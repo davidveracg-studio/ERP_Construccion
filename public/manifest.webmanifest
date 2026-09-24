@@ -1,0 +1,10 @@
+{
+  "name": "VPAI — Control de gestión de obras",
+  "short_name": "VPAI",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#0f172a",
+  "lang": "es-CL",
+  "icons": [{ "src": "favicon.png", "sizes": "1200x1200", "type": "image/png", "purpose": "any" }]
+}
