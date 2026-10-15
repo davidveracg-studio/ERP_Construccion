@@ -1,0 +1,33 @@
+# Mantiene activo el proyecto de Supabase (plan gratuito) con una consulta
+# liviana cada 3 días, para que la demo no se pause por inactividad.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *' # 12:00 UTC, cada 3 días
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Consulta liviana a Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Faltan los secrets SUPABASE_URL o SUPABASE_ANON_KEY" >&2
+            exit 1
+          fi
+          # Con la clave anon el RLS devuelve [], pero la consulta llega a Postgres.
+          status=$(curl -sS -o respuesta.json -w '%{http_code}' \
+            "${SUPABASE_URL%/}/rest/v1/empresas?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "HTTP $status"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            cat respuesta.json >&2
+            exit 1
+          fi
