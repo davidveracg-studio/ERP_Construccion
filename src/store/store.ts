@@ -14,11 +14,15 @@ import { hoy } from '../domain/fechas'
 import { uid } from '../domain/formato'
 import { cerrarPeriodo, periodosDe } from '../domain/periodos'
 import { aplicarAccionRiesgo, accionesRiesgo, puedeCrearRiesgo, type AccionRiesgo, type DatosAccionRiesgo } from '../domain/riesgos'
+import {
+  accionesRFI, accionesSubmittal, aplicarAccionRFI, aplicarAccionSubmittal, emisorFolio, estadoRFI, estadoSubmittal, nuevaRevisionSubmittal,
+  puedeConfirmarTerreno, puedeCrearRFI, puedeCrearSubmittal, puedePublicarDocumento, revisionVigente, type AccionRFI, type AccionSubmittal,
+} from '../domain/documental'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio,
 } from '../domain/types'
 
 export interface UI {
@@ -92,6 +96,23 @@ export interface Acciones {
   crearRiesgo: (r: Pick<Riesgo, 'obraId' | 'titulo' | 'causa' | 'categoria' | 'partidaIds' | 'responsable'>) => { id?: string; error?: string }
   /** Transición del riesgo (10 §25); devuelve el motivo si no se pudo. */
   accionRiesgo: (id: string, accion: AccionRiesgo, datos?: Omit<DatosAccionRiesgo, 'fecha' | 'autor'>) => string | null
+  /** Registra un plano o EETT con su primera revisión. */
+  crearDocumento: (d: Pick<Documento, 'obraId' | 'codigo' | 'titulo' | 'tipo' | 'especialidad' | 'partidaIds'>, rev: Pick<RevisionDocumento, 'revision' | 'motivo' | 'archivo'>) => string | null
+  /** Publica una revisión nueva: la anterior queda superada. */
+  publicarRevision: (id: string, rev: Pick<RevisionDocumento, 'revision' | 'motivo' | 'archivo'>) => string | null
+  /** Terreno confirma que recibió y usa la revisión vigente (RULE-905). */
+  confirmarTerreno: (id: string) => string | null
+  crearRFI: (r: Pick<RFI, 'obraId' | 'asunto' | 'pregunta' | 'disciplina' | 'destinatario' | 'fechaLimite' | 'impacto' | 'partidaIds' | 'documentoId'>) => { id?: string; error?: string }
+  editarRFI: (id: string, cambios: Partial<Pick<RFI, 'asunto' | 'pregunta' | 'disciplina' | 'destinatario' | 'fechaLimite' | 'impacto' | 'partidaIds' | 'documentoId'>>) => void
+  accionRFI: (id: string, accion: AccionRFI, datos?: { texto?: string; ordenCambioId?: string; riesgoId?: string }) => string | null
+  /** Vincula el RFI a la orden de cambio o al riesgo que originó. */
+  vincularRFI: (id: string, v: Partial<Pick<RFI, 'ordenCambioId' | 'riesgoId'>>) => void
+  crearSubmittal: (s: Pick<Submittal, 'obraId' | 'titulo' | 'tipo' | 'descripcion' | 'proveedor' | 'partidaIds' | 'fechaRequerida'>) => { id?: string; error?: string }
+  editarSubmittal: (id: string, cambios: Partial<Pick<Submittal, 'titulo' | 'tipo' | 'descripcion' | 'proveedor' | 'partidaIds' | 'fechaRequerida'>>) => void
+  /** Transición del submittal; al rechazarse crea la revisión siguiente en borrador y devuelve su id. */
+  accionSubmittal: (id: string, accion: AccionSubmittal, datos?: { texto?: string }) => { error?: string; nuevaRevision?: string }
+  /** Agrega un folio al Libro de Obra (inmutable). */
+  registrarFolio: (f: Pick<Folio, 'obraId' | 'tipo' | 'texto' | 'plazoRespuesta' | 'respondeA'>) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -423,6 +444,106 @@ export const useStore = create<Estado>()(
             return (e as Error).message
           }
         },
+        crearDocumento: (doc, rev) => {
+          const s = getS()
+          if (!puedePublicarDocumento(s.ui.rol)) return 'Tu rol no puede publicar documentos.'
+          if (!doc.codigo.trim() || !doc.titulo.trim() || !rev.revision.trim()) return 'Indica código, título y revisión.'
+          if (s.documentos.some((x) => x.obraId === doc.obraId && x.codigo.toLowerCase() === doc.codigo.trim().toLowerCase())) return `Ya existe el documento ${doc.codigo.trim()}.`
+          const t = hoy()
+          const nuevo: Documento = {
+            ...doc, id: uid('doc'), codigo: doc.codigo.trim(), titulo: doc.titulo.trim(), creado: t,
+            revisiones: [{ ...rev, id: uid('rev'), revision: rev.revision.trim(), fecha: t, publicadaPor: s.ui.usuario }],
+          }
+          mutar((x) => ({ documentos: [...x.documentos, nuevo] }))
+          return null
+        },
+        publicarRevision: (id, rev) => {
+          const s = getS()
+          const doc = s.documentos.find((x) => x.id === id)
+          if (!doc) return 'El documento no existe.'
+          if (!puedePublicarDocumento(s.ui.rol)) return 'Tu rol no puede publicar revisiones.'
+          const r = rev.revision.trim()
+          if (!r) return 'Indica la revisión.'
+          if (doc.revisiones.some((x) => x.revision.toLowerCase() === r.toLowerCase())) return `La revisión ${r} ya existe.`
+          const t = hoy()
+          mutar((x) => ({ documentos: x.documentos.map((d) => (d.id === id ? { ...d, revisiones: [...d.revisiones, { ...rev, id: uid('rev'), revision: r, fecha: t, publicadaPor: s.ui.usuario }] } : d)) }))
+          return null
+        },
+        confirmarTerreno: (id) => {
+          const s = getS()
+          const doc = s.documentos.find((x) => x.id === id)
+          if (!doc) return 'El documento no existe.'
+          if (!puedeConfirmarTerreno(s.ui.rol)) return 'La recepción en terreno la confirma el jefe de terreno o el administrador.'
+          const t = hoy()
+          const vig = revisionVigente(doc, t)!
+          mutar((x) => ({ documentos: x.documentos.map((d) => (d.id === id ? { ...d, enTerreno: { revisionId: vig.id, fecha: t, por: s.ui.usuario } } : d)) }))
+          return null
+        },
+        crearRFI: (r) => {
+          const s = getS()
+          if (!puedeCrearRFI(s.ui.rol)) return { error: 'Tu rol no puede emitir RFI.' }
+          if (!r.asunto.trim()) return { error: 'Indica el asunto.' }
+          const t = hoy()
+          const id = uid('rfi')
+          const numero = Math.max(0, ...s.rfis.filter((x) => x.obraId === r.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ rfis: [...x.rfis, { ...r, id, numero, asunto: r.asunto.trim(), historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return { id }
+        },
+        editarRFI: (id, cambios) =>
+          mutar((s) => ({ rfis: s.rfis.map((r) => (r.id === id && estadoRFI(r, hoy()) === 'borrador' ? { ...r, ...cambios } : r)) })),
+        accionRFI: (id, accion, datos = {}) => {
+          const s = getS()
+          const r = s.rfis.find((x) => x.id === id)
+          if (!r) return 'El RFI no existe.'
+          const t = hoy()
+          if (!accionesRFI(r, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            const nuevo = aplicarAccionRFI(r, accion, { ...datos, fecha: t, autor: s.ui.usuario })
+            mutar((x) => ({ rfis: x.rfis.map((y) => (y.id === id ? nuevo : y)) }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
+        vincularRFI: (id, v) => mutar((s) => ({ rfis: s.rfis.map((r) => (r.id === id ? { ...r, ...v } : r)) })),
+        crearSubmittal: (sub) => {
+          const s = getS()
+          if (!puedeCrearSubmittal(s.ui.rol)) return { error: 'Tu rol no puede crear submittals.' }
+          if (!sub.titulo.trim()) return { error: 'Indica qué se somete a aprobación.' }
+          const t = hoy()
+          const id = uid('sub')
+          const numero = Math.max(0, ...s.submittals.filter((x) => x.obraId === sub.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ submittals: [...x.submittals, { ...sub, id, numero, revision: 0, titulo: sub.titulo.trim(), historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return { id }
+        },
+        editarSubmittal: (id, cambios) =>
+          mutar((s) => ({ submittals: s.submittals.map((x) => (x.id === id && estadoSubmittal(x, hoy()) === 'borrador' ? { ...x, ...cambios } : x)) })),
+        accionSubmittal: (id, accion, datos = {}) => {
+          const s = getS()
+          const sub = s.submittals.find((x) => x.id === id)
+          if (!sub) return { error: 'El submittal no existe.' }
+          const t = hoy()
+          if (!accionesSubmittal(sub, t, s.ui.rol).includes(accion)) return { error: 'Tu rol no puede hacer esta acción en este estado.' }
+          try {
+            const nuevo = aplicarAccionSubmittal(sub, accion, { ...datos, fecha: t, autor: s.ui.usuario })
+            const siguiente = accion === 'rechazar' ? nuevaRevisionSubmittal(nuevo, uid('sub'), t, s.ui.usuario) : null
+            mutar((x) => ({ submittals: [...x.submittals.map((y) => (y.id === id ? nuevo : y)), ...(siguiente ? [siguiente] : [])] }))
+            return { nuevaRevision: siguiente?.id }
+          } catch (e) {
+            return { error: (e as Error).message }
+          }
+        },
+        registrarFolio: (f) => {
+          const s = getS()
+          const emisor = emisorFolio(s.ui.rol)
+          if (!emisor) return 'Firman el Libro de Obra el ITO, el administrador de obra y el jefe de terreno.'
+          if (!f.texto.trim()) return 'Escribe la anotación.'
+          const t = hoy()
+          if (f.plazoRespuesta != null && f.plazoRespuesta <= t) return 'El plazo de respuesta debe ser posterior a hoy.'
+          const numero = Math.max(0, ...s.folios.filter((x) => x.obraId === f.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ folios: [...x.folios, { ...f, id: uid('fol'), numero, fecha: t, autor: s.ui.usuario, emisor, texto: f.texto.trim() }] }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -430,7 +551,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 9,
+      version: 10,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

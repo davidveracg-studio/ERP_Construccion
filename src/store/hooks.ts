@@ -14,6 +14,7 @@ export function useDatosDominio(): Datos {
       rdos: s.rdos, costos: s.costos, compromisos: s.compromisos, reglasMapeo: s.reglasMapeo, ajustes: s.ajustes,
       periodos: s.periodos, alertas: s.alertas, estadosPago: s.estadosPago, ordenesCambio: s.ordenesCambio,
       obligaciones: s.obligaciones, garantias: s.garantias, recepciones: s.recepciones, riesgos: s.riesgos,
+      documentos: s.documentos, rfis: s.rfis, submittals: s.submittals, folios: s.folios,
     })),
   )
   return s

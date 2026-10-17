@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { DESTINATARIOS_RFI, folioPendiente, partidasCriticas, rfiVencido, terrenoDesactualizado, tocaCriticas, revisionVigente, TIPOS_FOLIO } from './documental'
 import { ETAPAS_OC, etapaOC } from './ordenesCambio'
 import { CATEGORIAS_RIESGO, diasSinPlan, DIAS_PLAN_CRITICO, ESCALA, estadoRiesgo, evaluacionVigente, exposicionRiesgo, NIVELES, revisionVencida } from './riesgos'
 import { desglosePartida, paretoActividades, paretoCuadrillas } from './explicacion'
@@ -43,7 +44,10 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-403': 'Estado de pago no presentado a tiempo',
   'RULE-404': 'Garantía por vencer o vencida',
   'RULE-601': 'Margen proyectado bajo mínimo',
+  'RULE-902': 'Folio del Libro de Obra sin respuesta',
+  'RULE-903': 'RFI sin respuesta en plazo',
   'RULE-904': 'Obligación contractual por vencer o vencida',
+  'RULE-905': 'Plano no vigente en uso en terreno',
   'RULE-602': 'CPI bajo umbral',
   'RULE-603': 'Caja proyectada negativa',
   'RULE-605': 'Desviación proyectada por partida',
@@ -418,6 +422,48 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       porQue: e === 'vencida' ? 'La garantía venció sin renovarse: puede ser causal de incumplimiento del contrato.' : `La garantía vence en ${g.vencimiento - c.corte} días.`,
       accionRequerida: 'Solicitar la renovación al banco o aseguradora y entregarla al mandante antes del vencimiento.',
       responsable: o.administrador,
+    })
+  }
+
+  // Gestión documental (v1.1): RULE-903 RFI vencido, RULE-902 folio sin respuesta y RULE-905 plano superado en terreno
+  const partCriticas = partidasCriticas(c)
+  for (const r of d.rfis.filter((x) => x.obraId === o.id && rfiVencido(x, c.corte))) {
+    const critico = tocaCriticas(r.partidaIds, partCriticas)
+    out.push({
+      regla: 'RULE-903', clave: `RULE-903|${r.id}`, severidad: critico ? 'alta' : 'media', titulo: `RFI N° ${r.numero} sin respuesta: ${r.asunto}`, entidad: `${o.nombre} · ${DESTINATARIOS_RFI[r.destinatario]}`,
+      datos: [
+        { etiqueta: 'Fecha límite', valor: fmtFecha(r.fechaLimite!) },
+        { etiqueta: 'Días de atraso', valor: `${c.corte - r.fechaLimite!}` },
+        ...(r.impacto ? [{ etiqueta: 'Impacto potencial', valor: `${mm(r.impacto.monto)} · ${r.impacto.dias} días` }] : []),
+      ],
+      porQue: `El ${DESTINATARIOS_RFI[r.destinatario].toLowerCase()} no respondió dentro del plazo.${critico ? ' La consulta afecta actividades de la ruta crítica.' : ''}`,
+      queProvoca: critico ? 'La demora es causa imputable al mandante: respaldo para solicitar aumento de plazo.' : undefined,
+      accionRequerida: critico ? 'Insistir por Libro de Obra, registrar la demora como riesgo y respaldar el aumento de plazo.' : 'Insistir al destinatario y registrar la demora.',
+      responsable: o.oficinaTecnica,
+    })
+  }
+  for (const f of d.folios.filter((x) => x.obraId === o.id)) {
+    const p = folioPendiente(f, d.folios, c.corte, d.config.diasHabiles)
+    if (!p?.vencido) continue
+    out.push({
+      regla: 'RULE-902', clave: `RULE-902|${f.id}`, severidad: 'media', titulo: `Folio N° ${f.numero} del Libro de Obra sin respuesta`, entidad: `${o.nombre} · ${TIPOS_FOLIO[f.tipo]} de ${f.autor}`,
+      datos: [{ etiqueta: 'Fecha del folio', valor: fmtFecha(f.fecha) }, { etiqueta: 'Plazo de respuesta', valor: fmtFecha(p.limite) }],
+      porQue: `La ${TIPOS_FOLIO[f.tipo].toLowerCase()} del ITO no tiene respuesta desde el ${fmtFecha(f.fecha)}.`,
+      accionRequerida: 'Responder por Libro de Obra: lo no respondido puede entenderse como aceptado.',
+      responsable: o.administrador,
+    })
+  }
+  for (const doc of d.documentos.filter((x) => x.obraId === o.id)) {
+    const usada = terrenoDesactualizado(doc, c.corte)
+    if (!usada) continue
+    const vig = revisionVigente(doc, c.corte)!
+    out.push({
+      regla: 'RULE-905', clave: `RULE-905|${doc.id}`, severidad: 'media', titulo: `Terreno usa una revisión superada: ${doc.codigo} ${doc.titulo}`, entidad: o.nombre,
+      datos: [{ etiqueta: 'En terreno', valor: `Rev. ${usada.revision}` }, { etiqueta: 'Vigente', valor: `Rev. ${vig.revision} del ${fmtFecha(vig.fecha)}` }],
+      porQue: 'Se publicó una revisión nueva y terreno no ha confirmado que la recibió.',
+      queProvoca: 'Construir con un plano superado obliga a demoler y rehacer.',
+      accionRequerida: 'Retirar las copias superadas, entregar la revisión vigente a los capataces de las partidas afectadas y confirmar la recepción.',
+      responsable: o.jefeTerreno,
     })
   }
 

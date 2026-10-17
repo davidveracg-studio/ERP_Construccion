@@ -232,6 +232,111 @@ export interface Riesgo {
   creadoPor: string
 }
 
+export type Especialidad = 'arquitectura' | 'estructura' | 'sanitaria' | 'electrica' | 'climatizacion' | 'general'
+export type TipoDocumento = 'plano' | 'eett' | 'memoria' | 'otro'
+
+/** Archivo adjunto guardado en el bucket "documentos-obra" (o en el dispositivo, en modo local). */
+export interface ArchivoDoc {
+  ruta: string
+  nombre: string
+  bytes: number
+}
+
+export interface RevisionDocumento {
+  id: string
+  /** A, B, C… en desarrollo; 0, 1, 2… para construcción. */
+  revision: string
+  fecha: Dia
+  motivo?: string
+  publicadaPor: string
+  archivo?: ArchivoDoc
+}
+
+/** Plano, EETT o memoria con control de revisiones (08 Documento): una sola revisión vigente. */
+export interface Documento {
+  id: string
+  obraId: string
+  codigo: string
+  titulo: string
+  tipo: TipoDocumento
+  especialidad: Especialidad
+  revisiones: RevisionDocumento[]
+  partidaIds: string[]
+  /** Revisión que terreno confirmó tener en uso (RULE-905). */
+  enTerreno?: { revisionId: string; fecha: Dia; por: string }
+  creado: Dia
+}
+
+/** Paso del ciclo de vida de un documento de oficina técnica; el estado es el último a la fecha. */
+export interface PasoDoc<E extends string> {
+  fecha: Dia
+  estado: E
+  por: string
+  texto?: string
+}
+
+export type EstadoRFI = 'borrador' | 'emitido' | 'respondido' | 'cerrado' | 'anulado'
+
+/** Consulta técnica formal (08 RFI, 10 §26). La respuesta y las repreguntas quedan en el historial. */
+export interface RFI {
+  id: string
+  obraId: string
+  numero: number
+  asunto: string
+  pregunta: string
+  disciplina: Especialidad
+  destinatario: 'mandante' | 'proyectista' | 'ito'
+  fechaLimite?: Dia
+  /** Impacto potencial en costo y plazo. */
+  impacto?: { monto: number; dias: number }
+  partidaIds: string[]
+  documentoId?: string
+  historial: PasoDoc<EstadoRFI>[]
+  ordenCambioId?: string
+  riesgoId?: string
+  creado: Dia
+  creadoPor: string
+}
+
+export type EstadoSubmittal = 'borrador' | 'enviado' | 'aprobado' | 'aprobado_con_observaciones' | 'rechazado' | 'anulado'
+export type TipoSubmittal = 'ficha_tecnica' | 'muestra' | 'plano_taller' | 'otro'
+
+/** Envío a aprobación del mandante (08 Submittal, 10 §27). Al rechazarse nace la revisión siguiente. */
+export interface Submittal {
+  id: string
+  obraId: string
+  numero: number
+  revision: number
+  titulo: string
+  tipo: TipoSubmittal
+  descripcion: string
+  proveedor?: string
+  partidaIds: string[]
+  /** Fecha en que la aprobación se necesita para la compra o la actividad. */
+  fechaRequerida?: Dia
+  reemplazaA?: string
+  historial: PasoDoc<EstadoSubmittal>[]
+  creado: Dia
+  creadoPor: string
+}
+
+export type TipoFolio = 'instruccion' | 'observacion' | 'comunicacion' | 'respuesta'
+
+/** Anotación del Libro de Obra: numerada, fechada, firmada e inmutable (RN-P03). */
+export interface Folio {
+  id: string
+  obraId: string
+  numero: number
+  fecha: Dia
+  autor: string
+  emisor: 'mandante' | 'contratista'
+  tipo: TipoFolio
+  texto: string
+  /** Plazo de respuesta indicado en el folio (si no, 3 días hábiles para instrucciones y observaciones del ITO). */
+  plazoRespuesta?: Dia
+  respondeA?: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
