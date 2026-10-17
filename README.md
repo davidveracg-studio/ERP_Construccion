@@ -72,6 +72,10 @@ src/pages/      Workspaces por rol
 src/components/ Design system y gráficos SVG (Curva S, Gantt, cascada, Pareto)
 ```
 
+## Despliegue
+
+Cada cambio en `main` se publica solo en Vercel (https://erp-construccion-eight.vercel.app) con el workflow `.github/workflows/deploy-vercel.yml`: corre los tests, construye con las variables de producción del proyecto en Vercel y despliega con la CLI. Necesita el secret `VERCEL_TOKEN` (token del team vpai, ver https://vercel.com/account/settings/tokens) y las variables `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` del repositorio. También se puede lanzar a mano desde Actions → Deploy Vercel → Run workflow.
+
 ## Pendiente para producción (docs 22–29)
 
 - Mover los cálculos (EVM, reglas, cierre de período) a Edge Functions y permisos de escritura por rol en RLS (hoy RLS aísla por empresa; los permisos finos por rol se aplican en la interfaz).
