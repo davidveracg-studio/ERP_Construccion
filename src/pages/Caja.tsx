@@ -3,18 +3,16 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { FlujoCaja } from '../components/graficos'
-import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, cx, inputCls } from '../components/ui'
-import {
-  condicionesDe, consolidarCaja, epVencido, ETAPAS_EP, etapaEP, lineasEP, TIPOS_MOVIMIENTO, type EtapaEP, type Movimiento,
-} from '../domain/caja'
+import { Boton, Campo, Card, Kpi, Modal, Titulo, cx, inputCls } from '../components/ui'
+import { EtapaBadge } from './EstadosPago'
+import { condicionesDe, consolidarCaja, TIPOS_MOVIMIENTO, type Movimiento } from '../domain/caja'
+import { etapaEP } from '../domain/estadosPago'
 import { calcularObra } from '../domain/evm'
-import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
-import { mm, num, pct } from '../domain/formato'
-import type { CondicionesPago, EstadoPago, EstadoSemaforo } from '../domain/types'
+import { fmtFecha, hoy } from '../domain/fechas'
+import { mm, pct } from '../domain/formato'
+import type { CondicionesPago, EstadoSemaforo } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
-
-const TONO_ETAPA: Record<EtapaEP, 'gris' | 'azul' | 'ambar' | 'verde'> = { presentado: 'gris', aprobado: 'azul', facturado: 'ambar', pagado: 'verde' }
 
 export default function Caja() {
   const { c } = useCalc()
@@ -30,7 +28,6 @@ export default function Caja() {
   }, [vista, d])
   if (!c) return null
 
-  const editable = rol === 'R01' || rol === 'R02' || rol === 'R05'
   const k = cartera ? cartera.total : c.caja
   const corte = c.corte
 
@@ -93,7 +90,7 @@ export default function Caja() {
         </Card>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[3fr_2fr] [&>*]:min-w-0">
-          <EstadosPago obraId={c.obra.id} corte={corte} editable={editable} />
+          <ResumenEP obraId={c.obra.id} corte={corte} />
           <Proximos movimientos={k.movimientos} corte={corte} />
         </div>
       )}
@@ -107,111 +104,28 @@ function EstadoPunto({ e }: { e: EstadoSemaforo }) {
   return <span className={cx('h-2.5 w-2.5 rounded-full', e === 'verde' ? 'bg-ok' : e === 'amarillo' ? 'bg-warn' : e === 'rojo' ? 'bg-crit' : 'bg-na')} />
 }
 
-function EstadosPago({ obraId, corte, editable }: { obraId: string; corte: number; editable: boolean }) {
+function ResumenEP({ obraId, corte }: { obraId: string; corte: number }) {
   const d = useDatosDominio()
-  const generar = useStore((s) => s.generarEstadoPago)
-  const [generando, setGenerando] = useState(false)
-  const [avance, setAvance] = useState<{ ep: EstadoPago; etapa: 'aprobado' | 'facturado' | 'pagado' } | null>(null)
-  const eps = d.estadosPago.filter((e) => e.obraId === obraId).sort((a, b) => b.numero - a.numero)
-  const siguiente = (e: EtapaEP | null) => (e === 'presentado' ? 'aprobado' : e === 'aprobado' ? 'facturado' : e === 'facturado' ? 'pagado' : null)
-  const accion = { aprobado: 'Aprobar', facturado: 'Facturar', pagado: 'Registrar pago' } as const
-
+  const eps = d.estadosPago.filter((e) => e.obraId === obraId && etapaEP(e, corte) !== 'anulado').sort((a, b) => b.numero - a.numero).slice(0, 6)
   return (
-    <Card titulo="Estados de pago al mandante" accion={editable ? <Boton variante="secundario" onClick={() => setGenerando(true)}>Generar EP</Boton> : undefined}>
-      {eps.length === 0 ? <p className="text-sm text-slate-500">Aún no hay estados de pago. Genera el primero con el avance validado.</p> : (
-        <div className="overflow-x-auto">
-          <table className="tabular w-full min-w-[560px] text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-right text-xs text-slate-500">
-                <th className="py-2 text-left font-medium">EP</th><th className="font-medium">Bruto</th><th className="font-medium">Neto a cobrar</th>
-                <th className="text-left font-medium">Estado</th><th />
-              </tr>
-            </thead>
-            <tbody>
-              {eps.map((e) => {
-                const etapa = etapaEP(e, corte)
-                const prox = siguiente(etapa)
-                const vencido = epVencido(e, corte)
-                return (
-                  <tr key={e.id} className="border-b border-slate-100 text-right align-top">
-                    <td className="py-1.5 text-left">
-                      <div className="font-medium">{e.tipo === 'anticipo' ? 'Anticipo' : `N° ${e.numero}`}</div>
-                      <div className="text-xs text-slate-500">{e.tipo === 'anticipo' ? fmtFecha(e.presentado) : `corte ${fmtFecha(e.fechaCorte)}`}{e.factura ? ` · ${e.factura}` : ''}</div>
-                    </td>
-                    <td>{mm(e.bruto)}</td>
-                    <td title={`Retención ${mm(e.retencion)} · amortización anticipo ${mm(e.amortizacion)}`}>{mm(e.neto)}</td>
-                    <td className="text-left">
-                      {etapa && <Badge tono={vencido ? 'rojo' : TONO_ETAPA[etapa]}>{vencido ? 'Vencido' : ETAPAS_EP[etapa]}</Badge>}
-                      <div className="text-xs text-slate-500">
-                        {etapa === 'pagado' ? `pagado ${fmtFecha(e.pagado!)}` : e.vencimiento ? `vence ${fmtFecha(e.vencimiento)}` : e.aprobado ? `aprobado ${fmtFecha(e.aprobado)}` : `presentado ${fmtFecha(e.presentado)}`}
-                      </div>
-                    </td>
-                    <td>{editable && prox && <button onClick={() => setAvance({ ep: e, etapa: prox })} className="text-sm text-marca hover:underline">{accion[prox]}</button>}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+    <Card titulo="Estados de pago al mandante" accion={<Link to="/estados-pago" className="text-sm text-marca">Ver todos →</Link>}>
+      {eps.length === 0 ? <p className="text-sm text-slate-500">Aún no hay estados de pago.</p> : (
+        <ul className="space-y-2 text-sm">
+          {eps.map((e) => {
+            const etapa = etapaEP(e, corte)
+            return (
+              <li key={e.id} className="flex items-center justify-between gap-2">
+                <Link to={`/estados-pago/${e.id}`} className="min-w-0 hover:underline">
+                  <span className="font-medium">{e.tipo === 'anticipo' ? 'Anticipo' : `EP N° ${e.numero}`}</span>
+                  <span className="ml-2 text-xs text-slate-500">{etapa === 'pagado' ? `pagado ${fmtFecha(e.pagado!)}` : e.vencimiento ? `vence ${fmtFecha(e.vencimiento)}` : `corte ${fmtFecha(e.fechaCorte)}`}</span>
+                </Link>
+                <span className="flex shrink-0 items-center gap-2"><span className="tabular">{mm(e.neto)}</span><EtapaBadge ep={e} t={corte} /></span>
+              </li>
+            )
+          })}
+        </ul>
       )}
-      {generando && <GenerarEP obraId={obraId} onCerrar={() => setGenerando(false)} onGenerar={generar} />}
-      {avance && <AvanzarEP {...avance} onCerrar={() => setAvance(null)} />}
     </Card>
-  )
-}
-
-function GenerarEP({ obraId, onCerrar, onGenerar }: { obraId: string; onCerrar: () => void; onGenerar: (obraId: string, corte: number) => unknown }) {
-  const d = useDatosDominio()
-  const [corte, setCorte] = useState(iso(hoy()))
-  const lineas = useMemo(() => lineasEP(d, obraId, dia(corte)), [d, obraId, corte])
-  const obra = d.obras.find((o) => o.id === obraId)!
-  const partidas = new Map(d.partidas.map((p) => [p.id, p]))
-  const bruto = lineas.reduce((s, l) => s + l.monto, 0)
-  const cond = condicionesDe(obra)
-  return (
-    <Modal abierto titulo="Generar estado de pago" onCerrar={onCerrar}>
-      <p className="mb-3 text-sm text-slate-600">Incluye el avance validado en los RDO hasta el corte que aún no está en otro EP, valorizado a precio de venta. Se registra como presentado al mandante.</p>
-      <Campo etiqueta="Fecha de corte"><input type="date" className={inputCls} value={corte} max={iso(hoy())} onChange={(e) => setCorte(e.target.value)} /></Campo>
-      {lineas.length === 0 ? <p className="mt-3 text-sm text-slate-500">No hay avance validado pendiente de cobro a esa fecha.</p> : (
-        <>
-          <ul className="mt-3 max-h-48 space-y-1 overflow-auto text-sm">
-            {lineas.map((l) => {
-              const p = partidas.get(l.partidaId)
-              return <li key={l.partidaId} className="tabular flex justify-between gap-2"><span className="truncate">{p?.codigo} {p?.descripcion} · {num(l.cantidad, 2)} {p?.unidad}</span><span>{mm(l.monto)}</span></li>
-            })}
-          </ul>
-          <dl className="tabular mt-3 space-y-0.5 border-t border-slate-100 pt-2 text-sm">
-            <div className="flex justify-between"><dt>Bruto</dt><dd>{mm(bruto)}</dd></div>
-            <div className="flex justify-between text-slate-500"><dt>Retención ({pct(cond.retencion, 0)})</dt><dd>−{mm(bruto * cond.retencion)}</dd></div>
-            {cond.anticipo > 0 && <div className="flex justify-between text-slate-500"><dt>Amortización anticipo (hasta {pct(cond.anticipo, 0)})</dt><dd>se descuenta al generar</dd></div>}
-          </dl>
-        </>
-      )}
-      <div className="mt-4 flex justify-end gap-2">
-        <Boton variante="secundario" onClick={onCerrar}>Cancelar</Boton>
-        <Boton disabled={lineas.length === 0} onClick={() => { onGenerar(obraId, dia(corte)); onCerrar() }}>Generar y presentar</Boton>
-      </div>
-    </Modal>
-  )
-}
-
-function AvanzarEP({ ep, etapa, onCerrar }: { ep: EstadoPago; etapa: 'aprobado' | 'facturado' | 'pagado'; onCerrar: () => void }) {
-  const avanzar = useStore((s) => s.avanzarEstadoPago)
-  const [fecha, setFecha] = useState(iso(hoy()))
-  const [factura, setFactura] = useState('')
-  const titulo = { aprobado: 'Registrar aprobación', facturado: 'Registrar factura', pagado: 'Registrar pago' }[etapa]
-  return (
-    <Modal abierto titulo={`${titulo} · ${ep.tipo === 'anticipo' ? 'Anticipo' : `EP N° ${ep.numero}`}`} onCerrar={onCerrar}>
-      <div className="space-y-3">
-        <Campo etiqueta="Fecha"><input type="date" className={inputCls} value={fecha} max={iso(hoy())} onChange={(e) => setFecha(e.target.value)} /></Campo>
-        {etapa === 'facturado' && <Campo etiqueta="N° de factura"><input className={inputCls} value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej.: F-1234" /></Campo>}
-        {etapa === 'pagado' && <p className="text-sm text-slate-600">Monto recibido: <span className="tabular font-medium">{mm(ep.neto)}</span></p>}
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <Boton variante="secundario" onClick={onCerrar}>Cancelar</Boton>
-        <Boton disabled={!fecha || (etapa === 'facturado' && !factura.trim())} onClick={() => { avanzar(ep.id, etapa, dia(fecha), factura.trim() || undefined); onCerrar() }}>Guardar</Boton>
-      </div>
-    </Modal>
   )
 }
 

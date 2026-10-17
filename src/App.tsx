@@ -12,12 +12,14 @@ import Cartera from './pages/Cartera'
 import Cierre from './pages/Cierre'
 import Configuracion from './pages/Configuracion'
 import Costos from './pages/Costos'
+import EstadosPago, { DetalleEP } from './pages/EstadosPago'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
 import NuevaObra from './pages/NuevaObra'
 import ObraTower from './pages/ObraTower'
 import PartidaDetalle from './pages/PartidaDetalle'
+import PortalMandante from './pages/PortalMandante'
 import Programa from './pages/Programa'
 import RDOPage from './pages/RDO'
 import Terreno from './pages/Terreno'
@@ -27,7 +29,7 @@ import { useStore } from './store/store'
 // three.js pesa: la simulación 4D se carga solo al abrirla
 const Obra4D = lazy(() => import('./pages/Obra4D'))
 
-const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos' } as const
+const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos', R11: '/mandante' } as const
 
 function Inicio() {
   const rol = useStore((s) => s.ui.rol)
@@ -36,6 +38,8 @@ function Inicio() {
 
 function Rutas() {
   const sinObras = useStore((s) => s.obras.length === 0)
+  // El mandante/ITO (externo) solo ve su portal: nunca costos, márgenes ni alertas internas (19 §5)
+  const mandante = useStore((s) => s.ui.rol === 'R11')
   return (
     <HashRouter>
       <Routes>
@@ -48,6 +52,14 @@ function Rutas() {
               <Route path="config" element={<Configuracion />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
+          ) : mandante ? (
+            <>
+              <Route index element={<Inicio />} />
+              <Route path="mandante" element={<PortalMandante />} />
+              <Route path="estados-pago/:id" element={<DetalleEP />} />
+              <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
+              <Route path="*" element={<Navigate to="/mandante" replace />} />
+            </>
           ) : (
             <>
               <Route index element={<Inicio />} />
@@ -58,6 +70,9 @@ function Rutas() {
               <Route path="alertas/:id" element={<AlertaDetalle />} />
               <Route path="costos" element={<Costos />} />
               <Route path="caja" element={<Caja />} />
+              <Route path="estados-pago" element={<EstadosPago />} />
+              <Route path="estados-pago/:id" element={<DetalleEP />} />
+              <Route path="mandante" element={<PortalMandante />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />

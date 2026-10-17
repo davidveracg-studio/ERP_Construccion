@@ -1,6 +1,7 @@
 // Reglas del núcleo de alerta temprana (12). Se evalúan al cerrar el período de control.
 import type { Datos } from './datos'
 import type { CalcObra } from './evm'
+import { epAtrasado } from './estadosPago'
 import { desglosePartida, paretoActividades, paretoCuadrillas } from './explicacion'
 import { fmtFecha } from './fechas'
 import { idx, mm, num, pct, pp, signoPct } from './formato'
@@ -35,6 +36,7 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-110': 'Registro de HH inconsistente',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-402': 'Estado de pago vencido',
+  'RULE-403': 'Estado de pago no presentado a tiempo',
   'RULE-601': 'Margen proyectado bajo mínimo',
   'RULE-602': 'CPI bajo umbral',
   'RULE-603': 'Caja proyectada negativa',
@@ -332,6 +334,21 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       responsable: dias > 15 ? o.administrador : o.oficinaTecnica,
     })
   }
+
+  // RULE-403 (v1.1): avance del mes cerrado sin EP presentado pasados los días de preparación
+  const atrasado = epAtrasado(d, o.id, c.corte)
+  if (atrasado != null)
+    out.push({
+      regla: 'RULE-403', clave: 'RULE-403', severidad: 'media',
+      titulo: `EP del corte ${fmtFecha(atrasado)} sin presentar`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Corte del período', valor: fmtFecha(atrasado) },
+        { etiqueta: 'Días desde el corte', valor: `${c.corte - atrasado}` },
+      ],
+      porQue: `Pasaron ${c.corte - atrasado} días desde el corte y el avance validado del período no se ha presentado al mandante.`,
+      accionRequerida: 'Preparar, revisar y presentar el estado de pago del período.',
+      responsable: o.oficinaTecnica,
+    })
 
   // RULE-609
   if (anterior) {

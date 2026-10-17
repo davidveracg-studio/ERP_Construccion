@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -11,6 +11,7 @@ export const ROLES: Record<Rol, string> = {
   R03: 'Jefe de Terreno',
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
+  R11: 'Mandante / ITO',
 }
 
 export type TipoRecurso = 'MO' | 'MAT' | 'EQ' | 'SUB' | 'OTRO'
@@ -90,11 +91,42 @@ export interface CondicionesPago {
    * brecha entre pagar costos y cobrar los EP. Caja disponible = capital + cobros − pagos.
    */
   capitalTrabajo: number
+  /** Reajuste del contrato por índice (p. ej. IPC): reajuste = bruto × (índice del período / base − 1). */
+  reajuste?: { indice: string; base: number }
+}
+
+/** Respaldo de una cantidad cubicada: por eje, nivel, recinto o elemento (08 Generador). */
+export interface Generador {
+  id: string
+  ubicacion: string
+  descripcion: string
+  /** Fórmula de respaldo, p. ej. "24 × 16 × 0,18". */
+  formula?: string
+  cantidad: number
+}
+
+/** Línea de cubicación del EP: avance de una partida en el período, a precio de venta. */
+export interface LineaEP {
+  partidaId: string
+  cantidad: number
+  monto: number
+  generadores?: Generador[]
+}
+
+export interface ObservacionEP {
+  fecha: Dia
+  autor: string
+  texto: string
+  /** Versión del EP observada. */
+  version: number
+  /** mandante: observación del ITO (vuelve a "observado"); interna: devolución en la revisión interna. */
+  origen: 'mandante' | 'interna'
 }
 
 /**
- * Estado de pago (EP) al mandante. Las fechas de cada etapa definen su estado a cualquier
- * fecha: presentado → aprobado → facturado → pagado (10 §9, versión simplificada).
+ * Estado de pago (EP) al mandante (10 §9). La etapa a cualquier fecha se deriva de las fechas
+ * registradas: borrador → en revisión interna → presentado ⇄ observado → aprobado → facturado →
+ * pagado parcial → pagado, o anulado. Montos netos de IVA.
  */
 export interface EstadoPago {
   id: string
@@ -102,20 +134,35 @@ export interface EstadoPago {
   numero: number
   tipo: 'anticipo' | 'avance'
   fechaCorte: Dia
-  /** Avance del período (vacío en el anticipo). */
-  lineas: { partidaId: string; cantidad: number; monto: number }[]
-  /** Valor del avance del período (o del anticipo). Montos netos, sin IVA. */
+  /** Sube en 1 cada vez que se reingresa tras una observación del mandante. */
+  version: number
+  /** Cubicación del período (vacía en el anticipo). */
+  lineas: LineaEP[]
+  /** Valor del avance del período (o del anticipo). */
   bruto: number
+  /** Índice del período para el reajuste (ver CondicionesPago.reajuste). */
+  indiceReajuste?: number
+  reajuste: number
+  /** Descuentos y multas acordados con el mandante. */
+  descuentos: { concepto: string; monto: number }[]
   retencion: number
   amortizacion: number
-  /** A cobrar: bruto − retención − amortización del anticipo. */
+  /** A cobrar: bruto + reajuste − retención − amortización − descuentos. */
   neto: number
-  presentado: Dia
+  creado: Dia
+  enRevision?: Dia
+  /** Fecha de cada presentación al mandante (una por versión). */
+  presentaciones: Dia[]
+  observaciones: ObservacionEP[]
   aprobado?: Dia
   facturado?: Dia
   factura?: string
   vencimiento?: Dia
+  pagos: { fecha: Dia; monto: number }[]
+  /** Fecha en que se completó el pago del neto. */
   pagado?: Dia
+  anulado?: Dia
+  motivoAnulacion?: string
 }
 
 /** Capa constructiva del modelo 4D paramétrico. */
