@@ -13,7 +13,8 @@ import { estadoObraPorRecepcion } from './contrato'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
-  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Garantia, Generador, Obligacion, Obra, OrdenCambio, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
+  Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso,
 } from './types'
 
 function rng(seed: number) {
@@ -518,6 +519,144 @@ function contratoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'obligaciones' | 'gara
   }
 }
 
+/** Registro de riesgos de la demo: vivos en distintas etapas (exposición bajo la contingencia) y cerrados. */
+function riesgosDemo(d: Datos, hoyDia: Dia): Riesgo[] {
+  const obra = (id: string) => d.obras.find((o) => o.id === id)!
+  type Ev = [fecha: Dia, p: Escala5, i: Escala5, monto: number, dias: number]
+  type Acc = [descripcion: string, responsable: string, creada: Dia, fecha: Dia, cumplida?: Dia]
+  const rs = (obraId: string, numero: number, x: {
+    titulo: string; causa: string; categoria: CategoriaRiesgo; responsable?: string; creado: Dia; pasos?: [EstadoRiesgo, Dia, string?][]
+    evals?: Ev[]; plan?: Acc[]; revision?: Dia; partidas?: string[]; impactoReal?: Riesgo['impactoReal']
+  }): Riesgo => {
+    const o = obra(obraId)
+    return {
+      id: `rs_${obraId}_${numero}`, obraId, numero, titulo: x.titulo, causa: x.causa, categoria: x.categoria, responsable: x.responsable, origen: 'manual',
+      evaluaciones: (x.evals ?? []).map(([fecha, probabilidad, impacto, impactoMonto, impactoDias]) => ({ fecha, probabilidad, impacto, impactoMonto, impactoDias, autor: x.responsable ?? o.administrador })),
+      plan: (x.plan ?? []).map(([descripcion, responsable, creada, fecha, cumplida], k) => ({ id: `ac${k + 1}`, descripcion, responsable, creada, fecha, cumplida })),
+      fechaRevision: x.revision,
+      historial: [
+        { fecha: x.creado, estado: 'identificado', por: o.oficinaTecnica },
+        ...(x.pasos ?? []).map(([estado, fecha, nota]) => ({ fecha, estado, por: estado === 'cerrado' ? o.administrador : x.responsable ?? o.administrador, ...(nota ? { nota } : {}) })),
+      ],
+      partidaIds: (x.partidas ?? []).map((cod) => `${obraId}_p${cod}`), impactoReal: x.impactoReal, creado: x.creado, creadoPor: o.oficinaTecnica,
+    }
+  }
+  const H = hoyDia
+  const a = obra('obra_aromos'), A = a.fechaInicio
+  const c = obra('obra_clinica'), C = c.fechaInicio
+  const b = obra('obra_bodegas'), B = b.fechaInicio
+  return [
+    // Edificio Los Aromos
+    rs('obra_aromos', 1, {
+      titulo: 'Permiso de ruptura de pavimento para el empalme sanitario', causa: 'La DOM puede demorar el permiso y atrasar la conexión de la red de agua potable.',
+      categoria: 'contractual', responsable: a.administrador, creado: A + 1, pasos: [['en_analisis', A + 1], ['abierto', A + 2], ['cerrado', A + 15, 'Permiso otorgado por la DOM.']],
+      evals: [[A + 2, 2, 2, 3_000_000, 6]],
+    }),
+    rs('obra_aromos', 2, {
+      titulo: 'Lluvias intensas durante la excavación masiva', causa: 'Frente de mal tiempo pronosticado durante la excavación; taludes expuestos.', categoria: 'externo',
+      responsable: a.jefeTerreno, creado: A + 3,
+      pasos: [['en_analisis', A + 3], ['abierto', A + 4], ['en_mitigacion', A + 5], ['materializado', A + 20, 'Dos días de lluvia: derrumbe parcial del talud norte.'], ['cerrado', A + 28]],
+      evals: [[A + 4, 3, 2, 5_000_000, 4]], plan: [['Cubrir taludes con polietileno y disponer bombas de achique', a.jefeTerreno, A + 5, A + 8, A + 7]],
+      partidas: ['2.1'], impactoReal: { monto: 3_800_000, dias: 3 },
+    }),
+    rs('obra_aromos', 3, {
+      titulo: 'Quiebra del subcontratista de enfierradura', causa: 'El subcontratista arrastra atrasos en el pago de cotizaciones (F30-1 observado).', categoria: 'subcontrato',
+      responsable: a.administrador, creado: A + 30, pasos: [['en_analisis', A + 30], ['abierto', A + 31], ['en_mitigacion', A + 32], ['cerrado', A + 75, 'Subcontratista al día y enfierradura sobre 80 %.']],
+      evals: [[A + 31, 2, 4, 20_000_000, 10]], plan: [['Exigir F30-1 mensual y pagar contra certificado; identificar un subcontratista de respaldo', a.administrador, A + 32, A + 40, A + 38]],
+      partidas: ['3.3'],
+    }),
+    rs('obra_aromos', 4, {
+      titulo: 'Falla de la grúa torre en el peak de hormigonado', causa: 'Grúa con 12 años de uso; una detención frena losas y moldajes.', categoria: 'tecnico',
+      responsable: a.jefeTerreno, creado: A + 40, pasos: [['en_analisis', A + 40], ['abierto', A + 41], ['en_mitigacion', A + 42], ['cerrado', A + 90, 'Obra gruesa en pisos superiores; la grúa ya no es crítica.']],
+      evals: [[A + 41, 2, 3, 9_000_000, 6]], plan: [['Mantención preventiva quincenal y grúa móvil de respaldo en convenio', a.jefeTerreno, A + 42, A + 50, A + 47]],
+    }),
+    rs('obra_aromos', 5, {
+      titulo: 'Atraso del proveedor de cerámicos importados', causa: 'Quiebre de stock del formato especificado; el proveedor informa 6 semanas adicionales de importación.',
+      categoria: 'abastecimiento', responsable: a.oficinaTecnica, creado: A + 68, pasos: [['en_analisis', A + 68], ['abierto', A + 70], ['en_mitigacion', A + 71]],
+      evals: [[A + 70, 3, 4, 30_000_000, 12], [H - 10, 2, 4, 30_000_000, 12]],
+      plan: [
+        ['Cotizar un formato equivalente con proveedor nacional y presentarlo a la ITO', a.oficinaTecnica, A + 71, A + 80, A + 78],
+        ['Adelantar la compra del 60 % del cerámico de los pisos 1 a 3', a.administrador, H - 10, H + 12],
+      ],
+      revision: H + 9, partidas: ['5.2'],
+    }),
+    rs('obra_aromos', 6, {
+      titulo: 'Moldaje insuficiente para las losas de los pisos superiores', causa: 'Moldajes Pacífico tiene comprometido su stock con otra obra en la misma semana.', categoria: 'abastecimiento',
+      responsable: a.jefeTerreno, creado: H - 24, pasos: [['en_analisis', H - 24], ['abierto', H - 22], ['en_mitigacion', H - 21]],
+      evals: [[H - 22, 3, 3, 8_000_000, 5]], plan: [['Reservar 1.700 m² adicionales con contrato de arriendo firmado', a.jefeTerreno, H - 21, H + 5]],
+      revision: H + 4, partidas: ['3.4'],
+    }),
+    rs('obra_aromos', 7, {
+      titulo: 'Cambio en planos de estructuras por observación del revisor', causa: 'El revisor independiente observó la armadura de las vigas del piso 5 (RFI pendiente).', categoria: 'tecnico',
+      responsable: a.oficinaTecnica, creado: H - 20, pasos: [['en_analisis', H - 20], ['abierto', H - 18]],
+      evals: [[H - 18, 2, 3, 14_000_000, 6]], revision: H + 6, partidas: ['3.2', '3.3'],
+    }),
+    rs('obra_aromos', 8, {
+      titulo: 'Restricción de horario por reclamo de vecinos', causa: 'La junta de vecinos reclamó ruidos de faena antes de las 8:00 ante la municipalidad.', categoria: 'externo', creado: H - 1,
+    }),
+    // Remodelación clínica
+    rs('obra_clinica', 1, {
+      titulo: 'Asbesto en cielos a demoler', causa: 'Edificio de 1985: los cielos pueden contener asbesto.', categoria: 'seguridad', responsable: c.administrador, creado: C + 1,
+      pasos: [['en_analisis', C + 1], ['abierto', C + 2], ['en_mitigacion', C + 2], ['cerrado', C + 9, 'Análisis de laboratorio negativo.']],
+      evals: [[C + 2, 2, 4, 6_000_000, 10]], plan: [['Tomar muestras y enviarlas a laboratorio acreditado', c.administrador, C + 2, C + 6, C + 6]], partidas: ['1.1'],
+    }),
+    rs('obra_clinica', 2, {
+      titulo: 'Acceso de camiones en horario de atención', causa: 'El único acceso de carga es compartido con ambulancias.', categoria: 'externo', responsable: c.jefeTerreno, creado: C + 2,
+      pasos: [['en_analisis', C + 2], ['abierto', C + 3], ['cerrado', C + 12, 'Mandante habilitó acceso nocturno de carga.']], evals: [[C + 3, 3, 2, 2_000_000, 4]],
+    }),
+    rs('obra_clinica', 3, {
+      titulo: 'Atraso de equipos de climatización de suministro del mandante', causa: 'El importador del mandante no confirmó la fecha de despacho.', categoria: 'abastecimiento',
+      responsable: c.oficinaTecnica, creado: C + 5,
+      pasos: [['en_analisis', C + 5], ['abierto', C + 6], ['materializado', C + 18, 'Los equipos llegaron 10 días tarde.'], ['cerrado', C + 30, 'Aumento de plazo gestionado con orden de cambio.']],
+      evals: [[C + 6, 3, 3, 4_000_000, 10]], partidas: ['4.2'], impactoReal: { monto: 0, dias: 10 },
+    }),
+    rs('obra_clinica', 4, {
+      titulo: 'Polvo de obra sobre equipos médicos', causa: 'Pabellones contiguos en funcionamiento durante la demolición.', categoria: 'seguridad', responsable: c.jefeTerreno, creado: C + 3,
+      pasos: [['en_analisis', C + 3], ['abierto', C + 4], ['en_mitigacion', C + 4], ['cerrado', C + 20, 'Demoliciones terminadas sin incidentes.']],
+      evals: [[C + 4, 2, 3, 5_000_000, 3]], plan: [['Sellar con polietileno y presión negativa el sector intervenido', c.jefeTerreno, C + 4, C + 6, C + 5]],
+    }),
+    rs('obra_clinica', 5, {
+      titulo: 'Corte de suministro eléctrico al conectar los tableros nuevos', causa: 'La conexión exige cortar energía a un sector con pacientes.', categoria: 'contractual',
+      responsable: c.administrador, creado: H - 15, pasos: [['en_analisis', H - 15], ['abierto', H - 14], ['en_mitigacion', H - 13]],
+      evals: [[H - 14, 2, 4, 8_000_000, 3]],
+      plan: [['Arrendar grupo electrógeno de respaldo', c.administrador, H - 13, H - 6, H - 7], ['Acordar con el mandante ventanas de corte en domingo', c.administrador, H - 13, H + 7]],
+      revision: H + 5, partidas: ['4.1'],
+    }),
+    rs('obra_clinica', 6, {
+      titulo: 'Bajo rendimiento de tabiquería en turno nocturno', causa: 'El trabajo de noche, por restricción de ruido, rinde menos que lo presupuestado.', categoria: 'costo',
+      responsable: c.jefeTerreno, creado: H - 9, pasos: [['en_analisis', H - 9], ['abierto', H - 8]], evals: [[H - 8, 2, 2, 3_000_000, 4]], revision: H + 8, partidas: ['2.1'],
+    }),
+    rs('obra_clinica', 7, {
+      titulo: 'Interferencias con instalaciones no catastradas', causa: 'Los planos de las instalaciones existentes están desactualizados.', categoria: 'tecnico',
+      responsable: c.oficinaTecnica, creado: H - 3, pasos: [['en_analisis', H - 3]],
+    }),
+    // Centro de bodegas (terminado)
+    rs('obra_bodegas', 1, {
+      titulo: 'Suelo con baja capacidad de soporte', causa: 'La mecánica de suelos tiene pocos sondajes en el sector oriente.', categoria: 'tecnico', responsable: b.oficinaTecnica, creado: B + 1,
+      pasos: [['en_analisis', B + 1], ['abierto', B + 3], ['cerrado', B + 25, 'Ensayos de placa conformes.']], evals: [[B + 3, 2, 4, 15_000_000, 12]],
+    }),
+    rs('obra_bodegas', 2, {
+      titulo: 'Atraso en la entrega de la estructura metálica', causa: 'La maestranza tiene la planta copada por otro proyecto.', categoria: 'subcontrato', responsable: b.administrador, creado: B + 20,
+      pasos: [['en_analisis', B + 20], ['abierto', B + 21], ['en_mitigacion', B + 22], ['materializado', B + 60, 'La estructura llegó 6 días tarde.'], ['cerrado', B + 75]],
+      evals: [[B + 21, 3, 3, 12_000_000, 8]], plan: [['Fabricación por etapas con despacho semanal comprometido', b.administrador, B + 22, B + 30, B + 29]],
+      partidas: ['4.1'], impactoReal: { monto: 4_500_000, dias: 6 },
+    }),
+    rs('obra_bodegas', 3, {
+      titulo: 'Viento durante el montaje de la cubierta', causa: 'Viento puelche frecuente en la temporada de montaje.', categoria: 'externo', responsable: b.jefeTerreno, creado: B + 70,
+      pasos: [['en_analisis', B + 70], ['abierto', B + 71], ['en_mitigacion', B + 71], ['cerrado', B + 110, 'Cubierta montada.']],
+      evals: [[B + 71, 3, 2, 4_000_000, 5]], plan: [['Montaje en las mañanas y anemómetro con límite de operación', b.jefeTerreno, B + 71, B + 75, B + 73]], partidas: ['5.1'],
+    }),
+    rs('obra_bodegas', 4, {
+      titulo: 'Recepción municipal condicionada a obras de urbanización', causa: 'La DOM puede exigir la pavimentación del frente antes de la recepción.', categoria: 'contractual', responsable: b.administrador, creado: B + 90,
+      pasos: [['en_analisis', B + 90], ['abierto', B + 91], ['cerrado', B + 140, 'Recepción municipal obtenida sin condiciones.']], evals: [[B + 91, 2, 3, 10_000_000, 15]],
+    }),
+    rs('obra_bodegas', 5, {
+      titulo: 'Certificado TE1 observado por la SEC', causa: 'La SEC puede observar el proyecto eléctrico y atrasar la recepción definitiva.', categoria: 'contractual',
+      responsable: b.oficinaTecnica, creado: H - 30, pasos: [['en_analisis', H - 30], ['abierto', H - 28]], evals: [[H - 28, 2, 2, 3_000_000, 15]], revision: H + 10,
+    }),
+  ]
+}
+
 /** Órdenes de cambio de la demo: una aprobada, una esperando al mandante y una recién valorizada. */
 function ordenesDemo(d: Datos, hoyDia: Dia): OrdenCambio[] {
   const obra = (id: string) => d.obras.find((o) => o.id === id)!
@@ -576,7 +715,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 5
+export const VERSION_DEMO = 6
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -595,7 +734,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -627,6 +766,8 @@ function generar(hoyDia: Dia): Datos {
   d.garantias.push(...contrato.garantias)
   d.recepciones.push(...contrato.recepciones)
   d.obras = d.obras.map((o) => ({ ...o, estado: estadoObraPorRecepcion(d.recepciones, o.id, hoyDia - 1, o.estado) }))
+  // Registro de riesgos
+  d.riesgos.push(...riesgosDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

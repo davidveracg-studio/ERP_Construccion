@@ -13,7 +13,7 @@ export function useDatosDominio(): Datos {
       config: s.config, obras: s.obras, partidas: s.partidas, programas: s.programas, cuadrillas: s.cuadrillas,
       rdos: s.rdos, costos: s.costos, compromisos: s.compromisos, reglasMapeo: s.reglasMapeo, ajustes: s.ajustes,
       periodos: s.periodos, alertas: s.alertas, estadosPago: s.estadosPago, ordenesCambio: s.ordenesCambio,
-      obligaciones: s.obligaciones, garantias: s.garantias, recepciones: s.recepciones,
+      obligaciones: s.obligaciones, garantias: s.garantias, recepciones: s.recepciones, riesgos: s.riesgos,
     })),
   )
   return s

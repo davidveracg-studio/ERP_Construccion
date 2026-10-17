@@ -176,6 +176,62 @@ export interface RecepcionObra {
   registradaPor: string
 }
 
+export type CategoriaRiesgo = 'plazo' | 'costo' | 'tecnico' | 'abastecimiento' | 'subcontrato' | 'seguridad' | 'contractual' | 'externo'
+export type EstadoRiesgo = 'identificado' | 'en_analisis' | 'abierto' | 'en_mitigacion' | 'materializado' | 'cerrado'
+/** Escala 1–5 (muy baja … muy alta). */
+export type Escala5 = 1 | 2 | 3 | 4 | 5
+
+/** Evaluación (o reevaluación) de un riesgo: probabilidad, impacto y su estimación en dinero y días. */
+export interface EvaluacionRiesgo {
+  fecha: Dia
+  probabilidad: Escala5
+  impacto: Escala5
+  impactoMonto: number
+  impactoDias: number
+  autor: string
+  nota?: string
+}
+
+/** Acción del plan de mitigación, con responsable y fecha. */
+export interface AccionMitigacion {
+  id: string
+  descripcion: string
+  responsable: string
+  fecha: Dia
+  creada: Dia
+  cumplida?: Dia
+}
+
+/** Paso del ciclo de vida del riesgo (10 §25); el estado vigente es el último paso a la fecha. */
+export interface PasoRiesgo {
+  fecha: Dia
+  estado: EstadoRiesgo
+  por: string
+  nota?: string
+}
+
+/** Riesgo del registro de la obra (08 Riesgo, RF-CTL-08). */
+export interface Riesgo {
+  id: string
+  obraId: string
+  numero: number
+  titulo: string
+  causa: string
+  categoria: CategoriaRiesgo
+  responsable?: string
+  origen: 'manual' | 'motor'
+  evaluaciones: EvaluacionRiesgo[]
+  plan: AccionMitigacion[]
+  /** Próxima revisión; obligatoria en `abierto` y `en_mitigacion` (RULE-611). */
+  fechaRevision?: Dia
+  historial: PasoRiesgo[]
+  partidaIds: string[]
+  /** Impacto real, al materializarse o al cerrar uno materializado. */
+  impactoReal?: { monto: number; dias: number }
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */

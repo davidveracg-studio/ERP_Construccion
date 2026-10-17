@@ -4,6 +4,7 @@ import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
 import { ETAPAS_OC, etapaOC } from './ordenesCambio'
+import { CATEGORIAS_RIESGO, diasSinPlan, DIAS_PLAN_CRITICO, ESCALA, estadoRiesgo, evaluacionVigente, exposicionRiesgo, NIVELES, revisionVencida } from './riesgos'
 import { desglosePartida, paretoActividades, paretoCuadrillas } from './explicacion'
 import { fmtFecha } from './fechas'
 import { idx, mm, num, pct, pp, signoPct } from './formato'
@@ -50,6 +51,9 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-607': 'Inconsistencia costo–avance',
   'RULE-608': 'VAC de la obra bajo umbral',
   'RULE-609': 'Semáforo ejecutivo en rojo',
+  'RULE-610': 'Riesgo crítico sin plan de mitigación',
+  'RULE-611': 'Riesgo con revisión vencida',
+  'RULE-612': 'Riesgo materializado',
 }
 
 export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl): Candidata[] {
@@ -415,6 +419,45 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       accionRequerida: 'Solicitar la renovación al banco o aseguradora y entregarla al mandante antes del vencimiento.',
       responsable: o.administrador,
     })
+  }
+
+  // Registro de riesgos (v1.1): RULE-610 crítico sin plan, RULE-611 revisión vencida y riesgo materializado
+  for (const r of d.riesgos.filter((x) => x.obraId === o.id)) {
+    const e = estadoRiesgo(r, c.corte)
+    const x = exposicionRiesgo(r, c.corte)
+    const ev = evaluacionVigente(r, c.corte)
+    const entidad = `Riesgo R-${String(r.numero).padStart(3, '0')} · ${CATEGORIAS_RIESGO[r.categoria]}`
+    const datosEv = ev && x ? [
+      { etiqueta: 'Probabilidad × impacto', valor: `${ESCALA[ev.probabilidad]} × ${ESCALA[ev.impacto]} → ${NIVELES[x.nivel]}` },
+      { etiqueta: 'Exposición', valor: `${mm(x.monto)} · ${num(x.dias, 1)} días` },
+    ] : []
+    const sinPlan = diasSinPlan(r, c.corte)
+    if (sinPlan >= DIAS_PLAN_CRITICO)
+      out.push({
+        regla: 'RULE-610', clave: `RULE-610|${r.id}`, severidad: 'alta', titulo: `Riesgo ${x ? NIVELES[x.nivel].toLowerCase() : ''} sin plan de mitigación: ${r.titulo}`, entidad,
+        datos: [...datosEv, { etiqueta: 'Días sin plan', valor: `${sinPlan}` }],
+        porQue: `El riesgo se evaluó con exposición ${x ? NIVELES[x.nivel].toLowerCase() : ''} hace ${sinPlan} días y todavía no tiene acciones de mitigación.`,
+        queProvoca: 'Si ocurre sin plan, el impacto estimado pasa directo al costo o al plazo de la obra.',
+        accionRequerida: 'Registrar el plan de mitigación con responsables y fechas; si no aplica, reevaluar o cerrar el riesgo.',
+        responsable: r.responsable ?? o.administrador,
+      })
+    if (revisionVencida(r, c.corte))
+      out.push({
+        regla: 'RULE-611', clave: `RULE-611|${r.id}`, severidad: 'media', titulo: `Revisión de riesgo vencida: ${r.titulo}`, entidad,
+        datos: [...datosEv, { etiqueta: 'Revisión', valor: r.fechaRevision != null ? fmtFecha(r.fechaRevision) : 'Sin fecha' }],
+        porQue: r.fechaRevision != null ? `La revisión estaba programada para el ${fmtFecha(r.fechaRevision)}.` : 'El riesgo está abierto sin fecha de revisión.',
+        accionRequerida: 'Revisar el riesgo: reevaluar probabilidad e impacto y fijar la próxima revisión.',
+        responsable: r.responsable ?? o.administrador,
+      })
+    if (e === 'materializado')
+      out.push({
+        regla: 'RULE-612', clave: `RULE-612|${r.id}`, severidad: x && (x.nivel === 'critico' || x.nivel === 'alto') ? 'alta' : 'media', titulo: `Riesgo materializado: ${r.titulo}`, entidad,
+        datos: [...datosEv, ...(r.impactoReal ? [{ etiqueta: 'Impacto real', valor: `${mm(r.impactoReal.monto)} · ${r.impactoReal.dias} días` }] : [])],
+        porQue: 'El riesgo ocurrió: su impacto ya no es una probabilidad sino un costo o un atraso.',
+        queProvoca: 'El forecast y el programa no lo reflejan hasta que se ajusten.',
+        accionRequerida: 'Ajustar el forecast o el programa y, si es imputable al mandante, gestionar una orden de cambio. Cerrar el riesgo con el impacto real.',
+        responsable: r.responsable ?? o.administrador,
+      })
   }
 
   // RULE-609

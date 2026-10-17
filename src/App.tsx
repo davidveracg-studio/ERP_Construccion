@@ -15,6 +15,7 @@ import Contrato from './pages/Contrato'
 import Costos from './pages/Costos'
 import EstadosPago, { DetalleEP } from './pages/EstadosPago'
 import OrdenesCambio, { DetalleOC } from './pages/OrdenesCambio'
+import Riesgos, { DetalleRiesgo } from './pages/Riesgos'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -79,6 +80,8 @@ function Rutas() {
               <Route path="ordenes-cambio" element={<OrdenesCambio />} />
               <Route path="contrato" element={<Contrato />} />
               <Route path="ordenes-cambio/:id" element={<DetalleOC />} />
+              <Route path="riesgos" element={<Riesgos />} />
+              <Route path="riesgos/:id" element={<DetalleRiesgo />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
