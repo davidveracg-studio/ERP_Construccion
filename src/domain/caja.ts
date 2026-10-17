@@ -115,7 +115,8 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
   }
 
   // --- Avance futuro: curva de la línea base reescalada al término proyectado ---
-  const partidas = d.partidas.filter((p) => p.obraId === obra.id)
+  // Solo partidas vigentes: las de órdenes de cambio pendientes no tienen venta todavía
+  const partidas = c.partidas.map((cp) => cp.p)
   const venta = partidas.reduce((s, p) => s + ventaDe(p), 0)
   const puVenta = new Map(partidas.map((p) => [p.id, p.puVenta]))
   const valReal = c.partidas.reduce((s, cp) => s + Math.min(cp.cantEjec, cp.p.cantidad) * (puVenta.get(cp.p.id) ?? 0), 0)

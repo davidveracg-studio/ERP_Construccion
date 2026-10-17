@@ -8,10 +8,11 @@ import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from '.
 import { diaSemana, finDeMes } from './fechas'
 import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
-import { hhPorUnidad } from './presupuesto'
+import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
+import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
-  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Generador, Obra, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
+  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Generador, Obra, OrdenCambio, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
 } from './types'
 
 function rng(seed: number) {
@@ -393,7 +394,7 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   }
   const unidades = new Map(partidas.map((p) => [p.id, p]))
   for (let corte = finDeMes(inicio), n = 1; corte + 1 <= ayer; corte = finDeMes(corte + 1)) {
-    const lineas = lineasEP({ rdos, estadosPago, partidas }, obra.id, corte).map((l) => ({ ...l, generadores: generadoresDemo(unidades.get(l.partidaId)!, l.cantidad, n) }))
+    const lineas = lineasEP({ rdos, estadosPago, partidas, ordenesCambio: [] }, obra.id, corte).map((l) => ({ ...l, generadores: generadoresDemo(unidades.get(l.partidaId)!, l.cantidad, n) }))
     const bruto = lineas.reduce((s, l) => s + l.monto, 0)
     if (bruto <= 0) continue
     const re = rng(spec.semilla * 31 + n)
@@ -430,6 +431,47 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   }
 }
 
+/** Órdenes de cambio de la demo: una aprobada, una esperando al mandante y una recién valorizada. */
+function ordenesDemo(d: Datos, hoyDia: Dia): OrdenCambio[] {
+  const obra = (id: string) => d.obras.find((o) => o.id === id)!
+  const partida = (id: string) => d.partidas.find((p) => p.id === id)!
+  const aromos = obra('obra_aromos').fechaInicio
+  const clinica = obra('obra_clinica').fechaInicio
+  const alb = partida('obra_aromos_p4.1')
+  const base = { devoluciones: [] }
+  return [
+    {
+      ...base, id: 'oc_obra_aromos_1', obraId: 'obra_aromos', numero: 1, tipo: 'extraordinaria', causa: 'imprevisto',
+      titulo: 'Muro de contención en deslinde poniente',
+      descripcion: 'La excavación dejó expuesto un relleno no informado en el deslinde poniente. Se agrega un muro de contención de hormigón armado.',
+      lineas: [{ nueva: { codigo: 'OC1.1', descripcion: 'Muro de contención H-25 (incluye moldaje y enfierradura)', unidad: 'm³', tipoCosto: 'SUB' }, cantidad: 38, puVenta: 285_000, puCosto: 236_000 }],
+      diasPlazo: 5, creada: aromos + 40, valorizada: aromos + 43, aprobadaInterna: aromos + 45, aprobadaInternaPor: 'Carolina Vega',
+      presentada: aromos + 46, aprobadaMandante: aromos + 56,
+    },
+    {
+      ...base, id: 'oc_obra_aromos_2', obraId: 'obra_aromos', numero: 2, tipo: 'aumento', causa: 'mandante',
+      titulo: 'Albañilería en shafts en vez de tabiquería',
+      descripcion: 'El mandante pidió cerrar los shafts sanitarios con albañilería de ladrillo en lugar de tabiquería, por resistencia al fuego.',
+      lineas: [{ partidaId: alb.id, cantidad: 180, puVenta: alb.puVenta, puCosto: puCosto(alb) }],
+      diasPlazo: 0, creada: hoyDia - 20, valorizada: hoyDia - 17, aprobadaInterna: hoyDia - 15, aprobadaInternaPor: 'Carolina Vega', presentada: hoyDia - 12,
+    },
+    {
+      ...base, id: 'oc_obra_aromos_3', obraId: 'obra_aromos', numero: 3, tipo: 'extraordinaria', causa: 'mandante',
+      titulo: 'Porcelanato en baños en vez de cerámico',
+      descripcion: 'Diferencia de costo por cambio de cerámico 30×30 a porcelanato 60×60 en los baños de los departamentos.',
+      lineas: [{ nueva: { codigo: 'OC3.1', descripcion: 'Diferencia porcelanato 60×60 sobre cerámico', unidad: 'm²', tipoCosto: 'MAT' }, cantidad: 420, puVenta: 9_800, puCosto: 7_900 }],
+      diasPlazo: 0, creada: hoyDia - 4, valorizada: hoyDia - 2,
+    },
+    {
+      ...base, id: 'oc_obra_clinica_1', obraId: 'obra_clinica', numero: 1, tipo: 'plazo', causa: 'mandante',
+      titulo: 'Aumento de plazo por entrega tardía de equipos de clima',
+      descripcion: 'Los equipos de climatización, de suministro del mandante, llegaron con 10 días de atraso.',
+      lineas: [], diasPlazo: 10, creada: clinica + 20, valorizada: clinica + 21, aprobadaInterna: clinica + 22, aprobadaInternaPor: 'Rodrigo Tapia',
+      presentada: clinica + 23, aprobadaMandante: clinica + 30,
+    },
+  ]
+}
+
 /** Respaldo de cantidades de ejemplo: la cantidad del período repartida por sector, con fórmula en m² y m³. */
 function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
   const sectores = p.unidad === 'gl' ? [['Según avance validado en RDO', 1]] as const
@@ -447,7 +489,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 3
+export const VERSION_DEMO = 4
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -466,7 +508,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA]) {
     const s = simular(spec, hoyDia)
@@ -479,6 +521,18 @@ function generar(hoyDia: Dia): Datos {
     d.compromisos.push(...s.compromisos)
     d.reglasMapeo.push(...s.reglas)
     d.estadosPago.push(...s.estadosPago)
+  }
+  // Órdenes de cambio en distintas etapas, con los efectos de las ya aprobadas por el mandante
+  for (const oc of ordenesDemo(d, hoyDia)) {
+    d.ordenesCambio.push(oc)
+    const etapa = etapaOC(oc, hoyDia - 1)
+    if (etapa === 'aprobada_interna' || etapa === 'presentada' || etapa === 'aprobada_mandante') d.partidas.push(...partidasNuevas(oc))
+    if (etapa === 'aprobada_mandante') {
+      const obra = d.obras.find((o) => o.id === oc.obraId)!
+      const efecto = aplicarAprobacion(d.partidas, obra, oc, oc.aprobadaMandante!)
+      d.partidas = efecto.partidas
+      d.obras = d.obras.map((o) => (o.id === obra.id ? efecto.obra : o))
+    }
   }
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')

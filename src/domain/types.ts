@@ -42,10 +42,54 @@ export interface Partida {
   capitulo: string
   descripcion: string
   unidad: string
-  /** Cantidad vigente (contratada + órdenes de cambio). */
+  /** Cantidad vigente (contratada + órdenes de cambio aprobadas). */
   cantidad: number
   puVenta: number
   recursos: Recurso[]
+  /** Partida extraordinaria creada por una orden de cambio: no cuenta hasta que el mandante la aprueba. */
+  ordenCambioId?: string
+  /** Desde cuándo se programa una partida sin actividad en la Carta Gantt (por defecto, el inicio de obra). */
+  inicioProgramado?: Dia
+}
+
+export type TipoOrdenCambio = 'aumento' | 'extraordinaria' | 'disminucion' | 'plazo'
+
+/** Línea de una orden de cambio: ajuste de una partida existente o partida nueva (extraordinaria). */
+export interface LineaOrdenCambio {
+  /** Partida existente que se ajusta; vacío si la línea crea una partida nueva. */
+  partidaId?: string
+  nueva?: { codigo: string; descripcion: string; unidad: string; tipoCosto: TipoRecurso }
+  /** Variación de cantidad: positiva en aumentos y obras nuevas, negativa en disminuciones. */
+  cantidad: number
+  /** Precio de venta: el de contrato en partidas existentes; el acordado en las nuevas. */
+  puVenta: number
+  /** Costo unitario (APU); no lo ve el mandante. */
+  puCosto: number
+}
+
+/** Orden de cambio del contrato (10 §10): valorización, aprobación interna y del mandante. */
+export interface OrdenCambio {
+  id: string
+  obraId: string
+  numero: number
+  tipo: TipoOrdenCambio
+  titulo: string
+  causa: 'mandante' | 'proyecto' | 'imprevisto' | 'mayor_obra'
+  descripcion: string
+  lineas: LineaOrdenCambio[]
+  /** Días de aumento (o reducción, si es negativo) del plazo contractual. */
+  diasPlazo: number
+  creada: Dia
+  valorizada?: Dia
+  aprobadaInterna?: Dia
+  aprobadaInternaPor?: string
+  presentada?: Dia
+  aprobadaMandante?: Dia
+  rechazada?: Dia
+  motivoRechazo?: string
+  anulada?: Dia
+  motivoAnulacion?: string
+  devoluciones: { fecha: Dia; autor: string; texto: string }[]
 }
 
 export type EstadoObra = 'planificacion' | 'en_ejecucion' | 'paralizada' | 'terminada'

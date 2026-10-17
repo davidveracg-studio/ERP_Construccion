@@ -1,5 +1,5 @@
 import type {
-  AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Obra, Partida,
+  AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Obra, OrdenCambio, Partida,
   PeriodoControl, Programa, RDO, ReglaMapeo,
 } from './types'
 
@@ -18,6 +18,7 @@ export interface Datos {
   periodos: PeriodoControl[]
   alertas: Alerta[]
   estadosPago: EstadoPago[]
+  ordenesCambio: OrdenCambio[]
 }
 
 export const CONFIG_DEFECTO: Config = {
@@ -49,13 +50,13 @@ export function programaDe(d: Datos, obraId: string, tipo: Programa['tipo']): Pr
 
 /** Colecciones del dominio (una tabla por colección en Supabase). */
 export const COLECCIONES = [
-  'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago',
+  'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago', 'ordenesCambio',
 ] as const
 export type Coleccion = (typeof COLECCIONES)[number]
 
 export function datosVacios(): Datos {
   return {
     config: CONFIG_DEFECTO, obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [],
   }
 }

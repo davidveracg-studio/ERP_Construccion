@@ -13,6 +13,7 @@ import Cierre from './pages/Cierre'
 import Configuracion from './pages/Configuracion'
 import Costos from './pages/Costos'
 import EstadosPago, { DetalleEP } from './pages/EstadosPago'
+import OrdenesCambio, { DetalleOC } from './pages/OrdenesCambio'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -57,6 +58,7 @@ function Rutas() {
               <Route index element={<Inicio />} />
               <Route path="mandante" element={<PortalMandante />} />
               <Route path="estados-pago/:id" element={<DetalleEP />} />
+              <Route path="ordenes-cambio/:id" element={<DetalleOC />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="*" element={<Navigate to="/mandante" replace />} />
             </>
@@ -73,6 +75,8 @@ function Rutas() {
               <Route path="estados-pago" element={<EstadosPago />} />
               <Route path="estados-pago/:id" element={<DetalleEP />} />
               <Route path="mandante" element={<PortalMandante />} />
+              <Route path="ordenes-cambio" element={<OrdenesCambio />} />
+              <Route path="ordenes-cambio/:id" element={<DetalleOC />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />

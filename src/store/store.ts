@@ -3,6 +3,9 @@ import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import { condicionesDe } from '../domain/caja'
 import { accionesEP, aplicarAccion, editable, lineasEP, recalcularEP, type AccionEP } from '../domain/estadosPago'
+import {
+  accionesOC, aplicarAccionOC, aplicarAprobacion, editableOC, partidasNuevas, requiereGerencia, type AccionOC,
+} from '../domain/ordenesCambio'
 import { calcularCPM } from '../domain/cpm'
 import { COLECCIONES, datosVacios, programaDe, type Datos } from '../domain/datos'
 import { calcularObra } from '../domain/evm'
@@ -13,7 +16,7 @@ import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Modelo4D, Obra, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
+  EstadoPago, Modelo4D, Obra, OrdenCambio, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
 } from '../domain/types'
 
 export interface UI {
@@ -67,6 +70,11 @@ export interface Acciones {
   /** Aplica una acción del ciclo del EP; devuelve el motivo si no se pudo. */
   accionEstadoPago: (id: string, accion: AccionEP, datos?: { texto?: string; factura?: string; monto?: number; fecha?: Dia }) => string | null
   guardarCondicionesPago: (obraId: string, c: CondicionesPago) => void
+  crearOrdenCambio: (obraId: string, datos: Pick<OrdenCambio, 'tipo' | 'titulo' | 'causa' | 'descripcion'>) => OrdenCambio
+  /** Edita una orden en borrador. */
+  editarOrdenCambio: (id: string, cambios: Partial<Pick<OrdenCambio, 'tipo' | 'titulo' | 'causa' | 'descripcion' | 'lineas' | 'diasPlazo'>>) => void
+  /** Aplica una acción del ciclo y sus efectos sobre partidas y plazo; devuelve el motivo si no se pudo. */
+  accionOrdenCambio: (id: string, accion: AccionOC, datos?: { texto?: string }) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -281,6 +289,55 @@ export const useStore = create<Estado>()(
             return e instanceof Error ? e.message : String(e)
           }
         },
+        crearOrdenCambio: (obraId, datos) => {
+          const propias = getS().ordenesCambio.filter((o) => o.obraId === obraId)
+          const oc: OrdenCambio = {
+            id: uid('oc'), obraId, numero: Math.max(0, ...propias.map((o) => o.numero)) + 1, ...datos,
+            lineas: [], diasPlazo: 0, creada: hoy(), devoluciones: [],
+          }
+          mutar((x) => ({ ordenesCambio: [...x.ordenesCambio, oc] }))
+          return oc
+        },
+        editarOrdenCambio: (id, cambios) =>
+          mutar((s) => ({ ordenesCambio: s.ordenesCambio.map((o) => (o.id === id && editableOC(o, hoy()) ? { ...o, ...cambios } : o)) })),
+        accionOrdenCambio: (id, accion, datos = {}) => {
+          const s = getS()
+          const oc = s.ordenesCambio.find((o) => o.id === id)
+          if (!oc) return 'La orden de cambio no existe.'
+          const t = hoy()
+          const venta = calcularObra(s, oc.obraId, t).venta
+          if (!accionesOC(oc, t, s.ui.rol, venta).includes(accion))
+            return accion === 'aprobar_interna' && requiereGerencia(oc, venta) ? 'Supera el 5 % del contrato: la aprueba Gerencia (R01).' : 'Tu rol no puede hacer esta acción en esta etapa.'
+          try {
+            const nueva = aplicarAccionOC(oc, accion, { fecha: t, autor: s.ui.usuario, texto: datos.texto })
+            mutar((x) => {
+              const ordenesCambio = x.ordenesCambio.map((o) => (o.id === id ? nueva : o))
+              // Al aprobarla internamente se crean las partidas extraordinarias (terreno ya puede reportarlas)
+              if (accion === 'aprobar_interna') {
+                const existentes = new Set(x.partidas.map((p) => p.id))
+                return { ordenesCambio, partidas: [...x.partidas, ...partidasNuevas(nueva).filter((p) => !existentes.has(p.id))] }
+              }
+              // Al aprobarla el mandante se ajustan cantidades vigentes y plazo del contrato
+              if (accion === 'aprobar_mandante') {
+                const obra = x.obras.find((o) => o.id === oc.obraId)!
+                const ejecutado = new Map<string, number>()
+                for (const r of x.rdos) if (r.obraId === oc.obraId && r.estado === 'validado') for (const a of r.avances) ejecutado.set(a.partidaId, (ejecutado.get(a.partidaId) ?? 0) + a.cantidad)
+                const efecto = aplicarAprobacion(x.partidas, obra, nueva, t, ejecutado)
+                return { ordenesCambio, partidas: efecto.partidas, obras: x.obras.map((o) => (o.id === obra.id ? efecto.obra : o)) }
+              }
+              // Anulada sin trabajo: se quitan sus partidas extraordinarias
+              if (accion === 'anular') {
+                const conAvance = new Set(x.rdos.flatMap((r) => r.avances.map((a) => a.partidaId)))
+                const conCosto = new Set(x.costos.map((k) => k.partidaId))
+                return { ordenesCambio, partidas: x.partidas.filter((p) => p.ordenCambioId !== id || conAvance.has(p.id) || conCosto.has(p.id)) }
+              }
+              return { ordenesCambio }
+            })
+            return null
+          } catch (e) {
+            return e instanceof Error ? e.message : String(e)
+          }
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -288,7 +345,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 6,
+      version: 7,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

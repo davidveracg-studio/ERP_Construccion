@@ -4,6 +4,8 @@ import { Badge, Boton, Card, Titulo, cx, inputCls } from '../components/ui'
 import { hhDeRegistro } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, uid } from '../domain/formato'
+import { etapaOC } from '../domain/ordenesCambio'
+import { hhPorUnidad } from '../domain/presupuesto'
 import { CAUSAS_NP, type CausaNoProductiva, type Clima, type RDO, type RegistroHH } from '../domain/types'
 import type { CalcObra } from '../domain/evm'
 import type { Cuadrilla } from '../domain/types'
@@ -37,8 +39,22 @@ export default function RDOPage() {
       if (enCurso) a.partidas.forEach((p) => ids.add(p.partidaId))
     }
     for (const r of d.rdos) if (r.cuadrillaId === cuadrillaId && r.fecha >= hoy() - 14) r.avances.forEach((a) => ids.add(a.partidaId))
-    return c.partidas.filter((p) => ids.has(p.p.id) && p.avance < 1)
-  }, [c, d.rdos, cuadrillaId])
+    const vigentes: PartidaRDO[] = c.partidas.filter((p) => ids.has(p.p.id) && p.avance < 1)
+    // Obras extraordinarias con orden aprobada internamente o presentada: se pueden ejecutar antes de la
+    // aprobación del mandante, con riesgo de no pago (RULE-105)
+    const ejecutado = new Map<string, number>()
+    for (const r of d.rdos) if (r.obraId === c.obra.id && r.estado === 'validado') for (const a of r.avances) ejecutado.set(a.partidaId, (ejecutado.get(a.partidaId) ?? 0) + a.cantidad)
+    const extraordinarias: PartidaRDO[] = d.partidas
+      .filter((p) => p.obraId === c.obra.id && p.ordenCambioId && !c.partidas.some((x) => x.p.id === p.id))
+      .flatMap((p) => {
+        const oc = d.ordenesCambio.find((o) => o.id === p.ordenCambioId)
+        const e = oc ? etapaOC(oc, hoy()) : null
+        if (!oc || (e !== 'aprobada_interna' && e !== 'presentada')) return []
+        const ce = ejecutado.get(p.id) ?? 0
+        return [{ p, cantEjec: ce, avance: p.cantidad > 0 ? ce / p.cantidad : 0, rendPres: hhPorUnidad(p) > 0 ? hhPorUnidad(p) : null, ordenCambio: oc.numero }]
+      })
+    return [...vigentes, ...extraordinarias]
+  }, [c, d.rdos, d.partidas, d.ordenesCambio, cuadrillaId])
 
   if (!c || !cq) return <p className="text-slate-500">Esta obra no tiene cuadrillas.</p>
   return (
@@ -77,8 +93,11 @@ export default function RDOPage() {
   )
 }
 
+/** Partida que se puede reportar en el RDO; ordenCambio indica una obra extraordinaria sin aprobación del mandante. */
+type PartidaRDO = Pick<CalcObra['partidas'][number], 'p' | 'cantEjec' | 'avance' | 'rendPres'> & { ordenCambio?: number }
+
 function Formulario({ c, cq, existente, partidasSemana, fecha }: {
-  c: CalcObra; cq: Cuadrilla; existente?: RDO; partidasSemana: CalcObra['partidas']; fecha: string
+  c: CalcObra; cq: Cuadrilla; existente?: RDO; partidasSemana: PartidaRDO[]; fecha: string
 }) {
   const ui = useStore((s) => s.ui)
   const guardar = useStore((s) => s.guardarRDO)
@@ -117,6 +136,8 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
     const q = Number(f.cantidad.replace(',', '.')) || 0
     if (cp && cp.cantEjec + q > cp.p.cantidad) advertencias.push(`${cp.p.codigo}: supera la cantidad contratada (${num(cp.p.cantidad)} ${cp.p.unidad}). Oficina Técnica revisará si es mayor obra (RULE-102).`)
     if (q > 0 && f.trabajadores === 0 && cp?.rendPres) advertencias.push(`${cp.p.codigo}: registraste avance sin HH (RULE-110).`)
+    const extra = partidasSemana.find((x) => x.p.id === pid && x.ordenCambio != null)
+    if (extra && q > 0) advertencias.push(`${extra.p.codigo}: la orden de cambio N° ${extra.ordenCambio} aún no la aprueba el mandante; este trabajo queda en riesgo de no pago (RULE-105).`)
   }
   if (hhTotal > maxHH) advertencias.push(`Las HH (${num(hhTotal)}) superan la dotación de la cuadrilla × 11 h (RULE-110).`)
 
@@ -140,6 +161,7 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
                 const falta = p.p.cantidad - p.cantEjec
                 return (
                   <div key={p.p.id} className="rounded-xl border border-slate-200 p-3">
+                    {p.ordenCambio != null && <p className="mb-1"><Badge tono="ambar">Orden de cambio N° {p.ordenCambio} sin aprobar por el mandante</Badge></p>}
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="font-medium">{p.p.codigo} {p.p.descripcion}</span>
                       <span className="text-xs text-slate-500">faltan {num(falta, 1)} {p.p.unidad}</span>
