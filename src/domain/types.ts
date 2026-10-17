@@ -67,6 +67,55 @@ export interface Obra {
   estado: EstadoObra
   /** Modelo 4D guardado; si no existe se infiere desde el programa. */
   modelo4d?: Modelo4D
+  /** Condiciones de pago del contrato; si no hay, se usan las de CONDICIONES_PAGO_DEFECTO. */
+  condicionesPago?: CondicionesPago
+}
+
+/** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
+export interface CondicionesPago {
+  /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
+  anticipo: number
+  /** Retención de cada EP (fracción); se devuelve al término. */
+  retencion: number
+  /** Días entre la presentación del EP y su aprobación. */
+  diasAprobacion: number
+  /** Días entre la factura y el pago del mandante (vencimiento). */
+  diasPago: number
+  /** Días de pago a proveedores y subcontratistas desde su factura. */
+  diasPagoProveedores: number
+  /** Días después del término en que se devuelven las retenciones. */
+  diasDevolucionRetencion: number
+  /**
+   * Capital de trabajo que la empresa asigna a la obra (fracción de la venta): financia la
+   * brecha entre pagar costos y cobrar los EP. Caja disponible = capital + cobros − pagos.
+   */
+  capitalTrabajo: number
+}
+
+/**
+ * Estado de pago (EP) al mandante. Las fechas de cada etapa definen su estado a cualquier
+ * fecha: presentado → aprobado → facturado → pagado (10 §9, versión simplificada).
+ */
+export interface EstadoPago {
+  id: string
+  obraId: string
+  numero: number
+  tipo: 'anticipo' | 'avance'
+  fechaCorte: Dia
+  /** Avance del período (vacío en el anticipo). */
+  lineas: { partidaId: string; cantidad: number; monto: number }[]
+  /** Valor del avance del período (o del anticipo). Montos netos, sin IVA. */
+  bruto: number
+  retencion: number
+  amortizacion: number
+  /** A cobrar: bruto − retención − amortización del anticipo. */
+  neto: number
+  presentado: Dia
+  aprobado?: Dia
+  facturado?: Dia
+  factura?: string
+  vencimiento?: Dia
+  pagado?: Dia
 }
 
 /** Capa constructiva del modelo 4D paramétrico. */
@@ -346,6 +395,8 @@ export interface Config {
   /** Día en que se generaron los datos de demostración (la demo se renueva cada día). */
   demoGenerada?: Dia
   umbrales: {
+    /** Colchón de caja por obra como fracción de su venta (KFI-06): bajo él, amarillo; bajo 0, rojo. */
+    cajaColchon?: number
     spi: [number, number]
     cpi: [number, number]
     avancePp: [number, number]

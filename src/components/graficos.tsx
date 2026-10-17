@@ -1,6 +1,7 @@
 // Gráficos SVG propios (18 §4). Colores de serie validados: EV azul, AC naranja,
 // PV aqua (discontinua) con etiquetas directas; estados usan la paleta de estado.
 import { useState } from 'react'
+import type { SemanaCaja } from '../domain/caja'
 import type { PuntoSerie } from '../domain/evm'
 import { fmtFecha, fmtFechaCorta } from '../domain/fechas'
 import { mm, pct } from '../domain/formato'
@@ -258,3 +259,84 @@ export function BarrasRendimiento({ items }: { items: { etiqueta: string; real: 
   )
 }
 
+
+// ---------------------------------------------------------------------------
+// Flujo de caja semanal: cobros (arriba) y pagos (abajo) en barras, caja disponible en línea.
+// Lo proyectado va más claro y la línea, discontinua después de hoy.
+// ---------------------------------------------------------------------------
+export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; corte: Dia; colchon: number }) {
+  const W = 720, H = 300, m = { l: 64, r: 16, t: 16, b: 28 }
+  const [hover, setHover] = useState<number | null>(null)
+  if (semanas.length === 0) return null
+  const max = Math.max(colchon, ...semanas.map((s) => Math.max(s.ingresos, s.saldo))) * 1.08
+  const min = Math.min(0, ...semanas.map((s) => Math.min(-s.egresos, s.saldo))) * 1.08
+  const ancho = (W - m.l - m.r) / semanas.length
+  const x = (i: number) => m.l + i * ancho
+  const y = (v: number) => m.t + ((max - v) / (max - min || 1)) * (H - m.t - m.b)
+  const iHoy = semanas.findIndex((s) => s.desde + 6 >= corte)
+  const real = semanas.slice(0, iHoy + 1)
+  const proy = semanas.slice(Math.max(0, iHoy))
+  const linea = (pts: SemanaCaja[], desde: number) => pts.map((s, i) => `${i ? 'L' : 'M'}${(x(desde + i) + ancho / 2).toFixed(1)},${y(s.saldo).toFixed(1)}`).join(' ')
+  const ticksY = Array.from({ length: 5 }, (_, i) => min + ((max - min) * i) / 4)
+  const paso = Math.max(1, Math.ceil(semanas.length / 8))
+  const h = hover != null ? semanas[hover] : null
+
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Flujo de caja semanal"
+        onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => {
+          const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
+          const i = Math.floor((((e.clientX - r.left) / r.width) * W - m.l) / ancho)
+          setHover(i >= 0 && i < semanas.length ? i : null)
+        }}>
+        {ticksY.map((v) => (
+          <g key={v}>
+            <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke={C.grid} />
+            <text x={m.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill={C.texto}>{mm(v)}</text>
+          </g>
+        ))}
+        {semanas.map((s, i) => {
+          const op = s.real ? 1 : 0.45
+          return (
+            <g key={s.desde} opacity={hover == null || hover === i ? op : op * 0.6}>
+              {s.ingresos > 0 && <rect x={x(i) + 1} y={y(s.ingresos)} width={Math.max(1, ancho - 2)} height={y(0) - y(s.ingresos)} fill={C.pv} />}
+              {s.egresos > 0 && <rect x={x(i) + 1} y={y(0)} width={Math.max(1, ancho - 2)} height={y(-s.egresos) - y(0)} fill={C.ac} />}
+            </g>
+          )
+        })}
+        <line x1={m.l} x2={W - m.r} y1={y(0)} y2={y(0)} stroke={C.eje} />
+        {colchon > 0 && (
+          <g>
+            <line x1={m.l} x2={W - m.r} y1={y(colchon)} y2={y(colchon)} stroke="#d97706" strokeDasharray="3 3" />
+            <text x={W - m.r} y={y(colchon) - 4} textAnchor="end" fontSize="10" fill="#b45309">colchón</text>
+          </g>
+        )}
+        <path d={linea(real, 0)} fill="none" stroke={C.ev} strokeWidth={2.2} />
+        <path d={linea(proy, Math.max(0, iHoy))} fill="none" stroke={C.ev} strokeWidth={2} strokeDasharray="5 4" />
+        {iHoy >= 0 && (
+          <g>
+            <line x1={x(iHoy) + ancho} x2={x(iHoy) + ancho} y1={m.t} y2={H - m.b} stroke={C.eje} strokeDasharray="2 3" />
+            <text x={x(iHoy) + ancho + 4} y={m.t + 10} fontSize="10" fill={C.texto}>hoy</text>
+          </g>
+        )}
+        {semanas.map((s, i) => i % paso === 0 && (
+          <text key={s.desde} x={x(i) + ancho / 2} y={H - 8} textAnchor="middle" fontSize="10" fill={C.texto}>{fmtFechaCorta(s.desde)}</text>
+        ))}
+      </svg>
+      {h && (
+        <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-slate-900/90 px-2.5 py-1.5 text-xs text-white shadow">
+          <div className="font-medium">Semana del {fmtFecha(h.desde)}{h.real ? '' : ' · proyectado'}</div>
+          <div className="tabular">Cobros {mm(h.ingresos)} · Pagos {mm(h.egresos)}</div>
+          <div className="tabular">Caja disponible {mm(h.saldo)}</div>
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: C.pv }} />Cobros</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: C.ac }} />Pagos</span>
+        <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: C.ev }} />Caja disponible</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-slate-300 opacity-60" />Más claro = proyectado</span>
+      </div>
+    </div>
+  )
+}

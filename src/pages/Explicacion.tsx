@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { AlertaCard } from '../components/AlertaCard'
 import { BarrasRendimiento, Cascada, Pareto, Sparkline } from '../components/graficos'
 import { Card, Luz, Titulo, cx } from '../components/ui'
-import { valorCelda } from '../components/Semaforo'
+import { rutaDimension, valorCelda } from '../components/Semaforo'
 import {
   causasNoProductivas, desgloseObra, paretoActividades, paretoCuadrillas, paretoPartidas, paretoProveedores,
 } from '../domain/explicacion'
@@ -52,7 +52,7 @@ export default function Explicacion() {
 
       <div className="flex flex-wrap gap-2">
         {sem.filter((s) => s.estado !== 'na').map((s) => (
-          <Link key={s.dim} to={`/explicacion/${s.dim}`} className={cx('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm', s.dim === dim ? 'border-marca bg-blue-50 text-marca' : 'border-slate-200 bg-white')}>
+          <Link key={s.dim} to={rutaDimension(s.dim)} className={cx('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm', s.dim === dim ? 'border-marca bg-blue-50 text-marca' : 'border-slate-200 bg-white')}>
             <Luz estado={s.estado} tam="sm" /> {s.nombre}
           </Link>
         ))}

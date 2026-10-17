@@ -22,7 +22,7 @@ La app tiene dos modos según las variables de entorno:
 
 ### Configurar Supabase (una vez)
 
-1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql` y `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM). Todos son idempotentes.
+1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql`, `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM) y `0004_estados_pago.sql` (estados de pago del flujo de caja). Todos son idempotentes.
 2. **Authentication → Sign In / Providers** → activar *Allow anonymous sign-ins*.
 3. Copiar `.env.example` a `.env.local` con la URL y la clave **anon public** del proyecto. La clave `service_role` nunca va en el frontend.
 
@@ -38,6 +38,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Control Tower de obra | `/obra` — semáforo, avance planificado vs real, Curva S (PV/EV/AC + proyección a EAC), CPI/SPI/CV/SV/EAC/ETC/VAC/TCPI, hitos | 07, 14 §4 |
 | Explicación en 3 niveles | `/explicacion/:dim` — ¿por qué? → cascada precio/consumo/rendimiento → Pareto por partida, cuadrilla o proveedor | 13 §8 |
 | Alertas y acciones | `/alertas` — 14 reglas del núcleo (RULE-101…609), acciones correctivas con verificación automática de efectividad | 10 §28, 12 |
+| Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
 | Carta Gantt | `/programa` — línea base vs proyectado, ruta crítica (CPM con FC/CC/FF/CF, desfases y hitos contractuales como fecha límite), re-baseline con aprobación de R01 | 10 §23, RF-PLA |
 | Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) o **BIM (IFC)** enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación. Los elementos IFC se asignan solos a capa (por clase) y piso (por nivel); modelo de ejemplo en `public/demo` | — |
@@ -55,6 +56,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   cpm.ts          Ruta crítica, holguras, proyección con reales y límites de hitos
   evm.ts          EVM por partida/obra, forecast, provisión de subcontratos, HH, confianza de datos
   modelo4d.ts     Modelo 4D: inferencia desde el programa, avance por capa/piso y línea de tiempo
+  caja.ts         Flujo de caja: estados de pago, cobros, pagos, proyección y mínimo a 60 días
   bim.ts          IFC → capas y pisos (clase IFC, niveles), orden constructivo de los elementos
   explicacion.ts  Descomposición determinista de desviaciones (suma = AC − EV) y Paretos
   reglas.ts       Reglas de alerta temprana del MVP

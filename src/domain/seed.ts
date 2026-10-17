@@ -4,13 +4,14 @@
 import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
 import { CONFIG_DEFECTO, type Datos } from './datos'
-import { diaSemana } from './fechas'
+import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from './caja'
+import { diaSemana, finDeMes } from './fechas'
 import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
 import { hhPorUnidad } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
-  Actividad, Compromiso, CostoReal, Cuadrilla, Dia, Obra, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
+  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Obra, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
 } from './types'
 
 function rng(seed: number) {
@@ -62,6 +63,7 @@ interface SpecObra {
   semilla: number
   /** Ritmo de las cuadrillas respecto del programa (por defecto RITMO_BASE). */
   ritmo?: number
+  condiciones: CondicionesPago
 }
 
 const MO = (hh: number, precio = 9500): Recurso => ({ tipo: 'MO', descripcion: 'Mano de obra', cantPorUnidad: hh, unidad: 'HH', precio })
@@ -74,6 +76,7 @@ const CUENTA: Record<TipoRecurso | 'GG', string> = { MO: '5-1-00', MAT: '5-1-01'
 
 const OBRA_AROMOS: SpecObra = {
   semilla: 42,
+  condiciones: { anticipo: 0.1, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25 },
   ritmo: 1.08,
   inicioHaceDias: 112,
   prefijoCC: 'LA',
@@ -135,6 +138,7 @@ const OBRA_AROMOS: SpecObra = {
 
 const OBRA_CLINICA: SpecObra = {
   semilla: 7,
+  condiciones: { anticipo: 0.15, retencion: 0.05, diasAprobacion: 7, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25 },
   inicioHaceDias: 42,
   prefijoCC: 'CE',
   obra: {
@@ -186,7 +190,7 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   const rand = (a: number, b: number) => a + (b - a) * r()
   let inicio = hoyDia - spec.inicioHaceDias
   inicio -= (diaSemana(inicio) + 6) % 7 // lunes
-  const obra: Obra = { ...spec.obra, fechaInicio: inicio }
+  const obra: Obra = { ...spec.obra, fechaInicio: inicio, condicionesPago: spec.condiciones }
   const partidas: Partida[] = spec.partidas.map((p) => ({
     id: `${obra.id}_p${p.codigo}`, obraId: obra.id, codigo: p.codigo, capitulo: p.capitulo,
     descripcion: p.descripcion, unidad: p.unidad, cantidad: p.cantidad, puVenta: p.puVenta, recursos: p.recursos,
@@ -370,10 +374,43 @@ function simular(spec: SpecObra, hoyDia: Dia) {
     creadoPor: obra.oficinaTecnica, fecha: inicio, actividades,
     motivo: tipo === 'lineaBase' ? 'Línea base inicial (programa contractual)' : undefined,
   })
+  // --- Estados de pago al mandante: anticipo al inicio y un EP por mes ---
+  const cond = spec.condiciones
+  const ayer = hoyDia - 1
+  const estadosPago: EstadoPago[] = []
+  const hasta = (f: Dia | undefined) => (f != null && f <= ayer ? f : undefined)
+  if (cond.anticipo > 0) {
+    const bruto = Math.round(partidas.reduce((s, p) => s + p.cantidad * p.puVenta, 0) * cond.anticipo)
+    estadosPago.push({
+      id: `ep_${obra.id}_0`, obraId: obra.id, numero: 0, tipo: 'anticipo', fechaCorte: inicio, lineas: [],
+      bruto, retencion: 0, amortizacion: 0, neto: bruto, presentado: inicio + 2,
+      aprobado: hasta(inicio + 7), facturado: hasta(inicio + 8), factura: hasta(inicio + 8) != null ? `F-${spec.prefijoCC}-1000` : undefined,
+      vencimiento: hasta(inicio + 8) != null ? inicio + 8 + cond.diasPago : undefined, pagado: hasta(inicio + 15),
+    })
+  }
+  for (let corte = finDeMes(inicio), n = 1; corte + DIAS_PREPARACION_EP <= ayer; corte = finDeMes(corte + 1)) {
+    const lineas = lineasEP({ rdos, estadosPago, partidas }, obra.id, corte)
+    const bruto = lineas.reduce((s, l) => s + l.monto, 0)
+    if (bruto <= 0) continue
+    const re = rng(spec.semilla * 31 + n)
+    const presentado = corte + DIAS_PREPARACION_EP
+    const aprobado = presentado + cond.diasAprobacion + Math.round(re() * 4 - 2)
+    const facturado = aprobado + 1
+    // Mandante cumplidor: paga entre 0 y 4 días antes del vencimiento
+    const vencimiento = facturado + cond.diasPago
+    estadosPago.push({
+      id: `ep_${obra.id}_${n}`, obraId: obra.id, numero: n, tipo: 'avance', fechaCorte: corte, lineas, bruto,
+      ...montosEP(bruto, cond, anticipoPorAmortizar(estadosPago, corte)),
+      presentado, aprobado: hasta(aprobado), facturado: hasta(facturado), factura: hasta(facturado) != null ? `F-${spec.prefijoCC}-${1000 + n}` : undefined,
+      vencimiento: hasta(facturado) != null ? vencimiento : undefined, pagado: hasta(vencimiento - Math.round(re() * 4)),
+    })
+    n++
+  }
+
   return {
     obra, partidas,
     programas: [mk('contractual', lbActs), mk('lineaBase', lbActs), mk('actualizado', actualActs)],
-    cuadrillas: [...cuadrillas.values()], rdos, costos, compromisos, reglas,
+    cuadrillas: [...cuadrillas.values()], rdos, costos, compromisos, reglas, estadosPago,
   }
 }
 
@@ -389,7 +426,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA]) {
     const s = simular(spec, hoyDia)
@@ -401,6 +438,7 @@ function generar(hoyDia: Dia): Datos {
     d.costos.push(...s.costos)
     d.compromisos.push(...s.compromisos)
     d.reglasMapeo.push(...s.reglas)
+    d.estadosPago.push(...s.estadosPago)
   }
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')

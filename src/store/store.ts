@@ -1,6 +1,7 @@
 import { del, get, set } from 'idb-keyval'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
+import { anticipoPorAmortizar, condicionesDe, lineasEP, montosEP } from '../domain/caja'
 import { calcularCPM } from '../domain/cpm'
 import { COLECCIONES, datosVacios, programaDe, type Datos } from '../domain/datos'
 import { calcularObra } from '../domain/evm'
@@ -10,8 +11,8 @@ import { cerrarPeriodo, periodosDe } from '../domain/periodos'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
-  AccionCorrectiva, Actividad, AjusteForecast, Compromiso, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  Modelo4D, Obra, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
+  AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
+  EstadoPago, Modelo4D, Obra, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
 } from '../domain/types'
 
 export interface UI {
@@ -57,6 +58,11 @@ export interface Acciones {
   cargarPrograma: (obraId: string, actividades: Actividad[]) => void
   /** Guarda el modelo 4D de la obra; undefined vuelve al modelo inferido del programa. */
   guardarModelo4D: (obraId: string, modelo: Modelo4D | undefined) => void
+  /** Genera y presenta el EP con el avance validado no cobrado hasta el corte (null si no hay avance). */
+  generarEstadoPago: (obraId: string, fechaCorte: Dia) => EstadoPago | null
+  /** Registra la aprobación, la factura (con su vencimiento) o el pago de un EP. */
+  avanzarEstadoPago: (id: string, etapa: 'aprobado' | 'facturado' | 'pagado', fecha: Dia, factura?: string) => void
+  guardarCondicionesPago: (obraId: string, c: CondicionesPago) => void
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -233,12 +239,40 @@ export const useStore = create<Estado>()(
           }),
         guardarModelo4D: (obraId, modelo) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, modelo4d: modelo } : o)) })),
+
+        generarEstadoPago: (obraId, fechaCorte) => {
+          const s = getS()
+          const obra = s.obras.find((o) => o.id === obraId)
+          const lineas = lineasEP(s, obraId, fechaCorte)
+          const bruto = lineas.reduce((t, l) => t + l.monto, 0)
+          if (!obra || bruto <= 0) return null
+          const propios = s.estadosPago.filter((e) => e.obraId === obraId)
+          const ep: EstadoPago = {
+            id: uid('ep'), obraId, numero: Math.max(0, ...propios.map((e) => e.numero)) + 1, tipo: 'avance', fechaCorte, lineas, bruto,
+            ...montosEP(bruto, condicionesDe(obra), anticipoPorAmortizar(propios, fechaCorte)),
+            presentado: Math.max(fechaCorte, hoy()),
+          }
+          mutar((x) => ({ estadosPago: [...x.estadosPago, ep] }))
+          return ep
+        },
+        avanzarEstadoPago: (id, etapa, fecha, factura) =>
+          mutar((s) => ({
+            estadosPago: s.estadosPago.map((e) => {
+              if (e.id !== id) return e
+              if (etapa === 'aprobado') return { ...e, aprobado: fecha }
+              if (etapa === 'pagado') return { ...e, pagado: fecha }
+              const obra = s.obras.find((o) => o.id === e.obraId)
+              return { ...e, facturado: fecha, factura, vencimiento: fecha + condicionesDe(obra ?? {}).diasPago }
+            }),
+          })),
+        guardarCondicionesPago: (obraId, c) =>
+          mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
     },
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 4,
+      version: 5,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
