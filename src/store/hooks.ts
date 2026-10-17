@@ -12,7 +12,7 @@ export function useDatosDominio(): Datos {
     useShallow((s) => ({
       config: s.config, obras: s.obras, partidas: s.partidas, programas: s.programas, cuadrillas: s.cuadrillas,
       rdos: s.rdos, costos: s.costos, compromisos: s.compromisos, reglasMapeo: s.reglasMapeo, ajustes: s.ajustes,
-      periodos: s.periodos, alertas: s.alertas,
+      periodos: s.periodos, alertas: s.alertas, estadosPago: s.estadosPago,
     })),
   )
   return s

@@ -1,13 +1,19 @@
 import { Link } from 'react-router'
 import type { CeldaSemaforo } from '../domain/semaforo'
-import { idx, pp, signoPct } from '../domain/formato'
+import { idx, mm, pp, signoPct } from '../domain/formato'
 import { cx, Luz } from './ui'
 
 export function valorCelda(c: CeldaSemaforo): string {
   if (c.estado === 'na') return c.disponibleEn ? `en ${c.disponibleEn}` : '—'
   if (c.dim === 'avance') return pp(c.valor)
   if (c.dim === 'productividad') return signoPct(c.valor)
+  if (c.dim === 'caja') return mm(c.valor ?? 0)
   return idx(c.valor)
+}
+
+/** Ruta que explica una dimensión: la caja tiene su propia pantalla. */
+export function rutaDimension(dim: CeldaSemaforo['dim'], obraId?: string) {
+  return dim === 'caja' ? '/caja' : `/explicacion/${dim}${obraId ? `?obra=${obraId}` : ''}`
 }
 
 /** Semáforo ejecutivo de 8 dimensiones (14 §5.3); cada celda abre la explicación. */
@@ -29,7 +35,7 @@ export function SemaforoEjecutivo({ celdas, obraId, compacto }: { celdas: CeldaS
         return c.estado === 'na' ? (
           <div key={c.dim} className={cls} title={`Disponible en ${c.disponibleEn}`}>{contenido}</div>
         ) : (
-          <Link key={c.dim} to={`/explicacion/${c.dim}${obraId ? `?obra=${obraId}` : ''}`} className={cls} title="Ver explicación">{contenido}</Link>
+          <Link key={c.dim} to={rutaDimension(c.dim, obraId)} className={cls} title="Ver explicación">{contenido}</Link>
         )
       })}
     </div>
@@ -40,7 +46,7 @@ export function MiniSemaforo({ celdas }: { celdas: CeldaSemaforo[] }) {
   return (
     <div className="flex items-center gap-1" aria-label="Semáforo de la obra">
       {celdas.filter((c) => c.estado !== 'na').map((c) => (
-        <Link key={c.dim} to={`/explicacion/${c.dim}`} title={`${c.nombre}: ${valorCelda(c)}`}>
+        <Link key={c.dim} to={rutaDimension(c.dim)} title={`${c.nombre}: ${valorCelda(c)}`}>
           <Luz estado={c.estado} tam="sm" />
         </Link>
       ))}

@@ -1,4 +1,4 @@
-// Semáforo ejecutivo de 8 dimensiones (14 §5.3). En el MVP 4 están activas.
+// Semáforo ejecutivo de 8 dimensiones (14 §5.3). Activas: plazo, costos, avance, productividad y caja.
 import type { CalcObra } from './evm'
 import type { Config, EstadoSemaforo } from './types'
 
@@ -21,7 +21,7 @@ export const DIMENSIONES: { dim: Dimension; nombre: string; kpi: string; disponi
   { dim: 'compras', nombre: 'Compras', kpi: 'OTIF', disponibleEn: 'v1.2' },
   { dim: 'calidad', nombre: 'Calidad', kpi: 'NCR abiertas', disponibleEn: 'v1.3' },
   { dim: 'seguridad', nombre: 'Seguridad', kpi: 'Accidentes', disponibleEn: 'v1.3' },
-  { dim: 'caja', nombre: 'Caja', kpi: 'Forecast', disponibleEn: 'v1.3' },
+  { dim: 'caja', nombre: 'Caja', kpi: 'Mínimo 60 días' },
 ]
 
 /** Mayor es mejor: ≥ u[0] verde, ≥ u[1] amarillo. */
@@ -45,6 +45,8 @@ export function semaforo(c: CalcObra, cfg: Config): CeldaSemaforo[] {
       case 'costos': valor = c.cpi; estado = mayorMejor(c.cpi, u.cpi); break
       case 'avance': valor = c.desvAvance; estado = mayorMejor(c.pvDir > 0 ? c.desvAvance : null, u.avancePp); break
       case 'productividad': valor = c.productividadDesv; estado = menorMejor(c.productividadDesv, u.productividad); break
+      // KFI-06: caja proyectada mínima a 60 días contra el colchón (ver caja.ts)
+      case 'caja': valor = c.caja.minimo60; estado = c.caja.estado; break
     }
     return { ...d, valor, estado }
   })
@@ -73,6 +75,8 @@ export function healthScore(c: CalcObra, cfg: Config): number | null {
     [avg([[norm(c.spi, 1, u.spi[1], 0.75), 0.6], [norm(c.atrasoProyectado, 0, 15, 45), 0.4]]), 0.2],
     [norm(c.desvAvance, 0, u.avancePp[1], -0.15), 0.1],
     [norm(c.productividadDesv, 0, u.productividad[1], 0.3), 0.1],
+    // Caja (14 §6: 10 %): mínimo a 60 días como fracción de la venta, contra el colchón
+    [c.venta > 0 && c.caja.estado !== 'na' ? norm(c.caja.minimo60 / c.venta, u.cajaColchon ?? 0.02, 0, -0.05) : null, 0.1],
   ]
   return avg(comps)
 }

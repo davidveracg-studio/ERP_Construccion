@@ -34,8 +34,10 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-109': 'Avance rezagado respecto del plazo',
   'RULE-110': 'Registro de HH inconsistente',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
+  'RULE-402': 'Estado de pago vencido',
   'RULE-601': 'Margen proyectado bajo mínimo',
   'RULE-602': 'CPI bajo umbral',
+  'RULE-603': 'Caja proyectada negativa',
   'RULE-605': 'Desviación proyectada por partida',
   'RULE-606': 'Rendimiento de MO sobre presupuesto',
   'RULE-607': 'Inconsistencia costo–avance',
@@ -289,6 +291,47 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       accionRequerida: 'Plan de recuperación de margen sobre las partidas del Pareto.',
       responsable: o.administrador, kpi: 'vac', valorKpi: c.vac,
     })
+
+  // RULE-603 (v1.3): saldo de caja proyectado bajo cero en los próximos 60 días
+  const caja = c.caja
+  if (caja.estado !== 'na' && caja.minimo60 < 0) {
+    const pagos = caja.movimientos
+      .filter((m) => m.origen !== 'real' && m.monto < 0 && m.fecha <= caja.fechaMinimo60)
+      .reduce((acc, m) => acc.set(m.detalle, (acc.get(m.detalle) ?? 0) - m.monto), new Map<string, number>())
+    const mayores = [...pagos].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${mm(v)}`)
+    out.push({
+      regla: 'RULE-603', clave: 'RULE-603', severidad: 'alta',
+      titulo: `Caja proyectada negativa: ${mm(caja.minimo60)} el ${fmtFecha(caja.fechaMinimo60)}`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Capital de trabajo asignado', valor: mm(caja.capital) },
+        { etiqueta: 'Caja disponible hoy', valor: mm(caja.disponibleHoy) },
+        { etiqueta: 'Mínimo próximos 60 días', valor: mm(caja.minimo60) },
+        { etiqueta: 'Fecha del mínimo', valor: fmtFecha(caja.fechaMinimo60) },
+        { etiqueta: 'EP vencidos por cobrar', valor: mm(caja.cxcVencida) },
+      ],
+      porQue: 'En los próximos 60 días la obra necesita más financiamiento que el capital de trabajo asignado (capital + cobros − pagos < 0).',
+      queExplica: [caja.cxcVencida > 0 ? `EP vencidos ${mm(caja.cxcVencida)}` : '', mayores.length ? `Pagos hasta el mínimo: ${mayores.join(' · ')}` : ''].filter(Boolean).join(' · ') || undefined,
+      accionRequerida: 'Acelerar la aprobación y el cobro de los EP y reprogramar pagos según la caja proyectada.',
+      responsable: o.administrador, kpi: 'caja', valorKpi: caja.minimo60,
+    })
+  }
+
+  // RULE-402 (v1.3): EP facturado con el vencimiento superado; escala a alta pasados 30 días
+  for (const ep of caja.epVencidos) {
+    const dias = c.corte - ep.vencimiento!
+    out.push({
+      regla: 'RULE-402', clave: `RULE-402|${ep.id}`, severidad: dias > 30 ? 'alta' : 'media',
+      titulo: `EP N° ${ep.numero} vencido hace ${dias} días`, entidad: o.mandante,
+      datos: [
+        { etiqueta: 'Monto por cobrar', valor: mm(ep.neto) },
+        { etiqueta: 'Factura', valor: ep.factura ?? '—' },
+        { etiqueta: 'Vencimiento', valor: fmtFecha(ep.vencimiento!) },
+      ],
+      porQue: `El mandante no ha pagado el EP N° ${ep.numero} y el plazo venció hace ${dias} días.`,
+      accionRequerida: dias > 15 ? 'Escalar la cobranza con el mandante y evaluar las medidas del contrato.' : 'Enviar recordatorio de pago al mandante.',
+      responsable: dias > 15 ? o.administrador : o.oficinaTecnica,
+    })
+  }
 
   // RULE-609
   if (anterior) {

@@ -1,5 +1,6 @@
 // Motor de Control de Obra (13 §5): EVM, forecast por partida, plazo y productividad.
 // Fórmulas en docs 14 §3–§4.
+import { calcularCaja, type ResumenCaja } from './caja'
 import { calcularCPM, type ResultadoCPM } from './cpm'
 import { programaDe, type Datos } from './datos'
 import { diaSemana, diasHabilesEntre } from './fechas'
@@ -106,6 +107,8 @@ export interface CalcObra {
   cpmLB: Map<string, ResultadoCPM>
   avanceAct: Map<string, number>
   hitos: HitoCalc[]
+  /** Flujo de caja de la obra (v1.3). */
+  caja: ResumenCaja
 }
 
 const TIPOS: TipoRecurso[] = ['MO', 'MAT', 'EQ', 'SUB', 'OTRO']
@@ -342,7 +345,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
       return { act: a, comprometida, proyectada, real, estado, atraso: (real ?? proyectada) - comprometida }
     })
 
-  return {
+  const calculado = {
     obra, corte, partidas: calc,
     bacDir, pvDir, evDir, acDir, eacDir,
     ggBac, ggPv, ggAc, ggEac, acNoProd, acSinImputar, provisionSub,
@@ -369,7 +372,10 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
     productividadDesv: hhPresAvance > 0 ? hhRealConPres / hhPresAvance - 1 : null,
     pctNoImputado, diasSinRDO, rdoPendientes, confianza,
     lb, actualizado, cpm, cpmLB, avanceAct, hitos,
-  }
+  } as CalcObra
+  // La caja usa el EVM ya calculado (costo por completar, término proyectado)
+  calculado.caja = calcularCaja(d, calculado)
+  return calculado
 }
 
 export interface PuntoSerie {

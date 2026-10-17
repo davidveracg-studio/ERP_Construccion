@@ -43,3 +43,9 @@ export function diasHabilesEntre(desde: Dia, hasta: Dia, habiles: number[]): Dia
   for (let d = desde; d <= hasta; d++) if (habiles.includes(diaSemana(d))) out.push(d)
   return out
 }
+
+/** Último día del mes del día dado. */
+export function finDeMes(d: Dia): Dia {
+  const f = new Date(d * MS_DIA)
+  return Math.round(Date.UTC(f.getUTCFullYear(), f.getUTCMonth() + 1, 0) / MS_DIA)
+}

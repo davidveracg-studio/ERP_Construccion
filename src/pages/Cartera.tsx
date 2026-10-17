@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router'
 import { Luz, Card, Titulo, Kpi, Badge } from '../components/ui'
-import { valorCelda } from '../components/Semaforo'
+import { rutaDimension, valorCelda } from '../components/Semaforo'
 import { calcularObra } from '../domain/evm'
 import { hoy } from '../domain/fechas'
 import { mm, pct, signoPct } from '../domain/formato'
@@ -67,7 +67,7 @@ export default function Cartera() {
                   {sem.map((s) => (
                     <td key={s.dim} className="px-1 text-center">
                       {s.estado === 'na' ? <span className="text-xs text-slate-300">{s.disponibleEn}</span> : (
-                        <button onClick={() => ir(o.id, `/explicacion/${s.dim}`)} className="inline-flex flex-col items-center gap-0.5" title={`${s.nombre}: ${valorCelda(s)}`}>
+                        <button onClick={() => ir(o.id, rutaDimension(s.dim))} className="inline-flex flex-col items-center gap-0.5" title={`${s.nombre}: ${valorCelda(s)}`}>
                           <Luz estado={s.estado} tam="sm" />
                           <span className="tabular text-[11px] text-slate-600">{valorCelda(s)}</span>
                         </button>

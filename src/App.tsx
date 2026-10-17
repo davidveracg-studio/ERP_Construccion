@@ -6,6 +6,7 @@ import { modoNube } from './lib/supabase'
 import { Cargando, IngresoDemo } from './pages/Acceso'
 import Alertas, { AlertaDetalle } from './pages/Alertas'
 import Bienvenida from './pages/Bienvenida'
+import Caja from './pages/Caja'
 import Cartera from './pages/Cartera'
 import Cierre from './pages/Cierre'
 import Configuracion from './pages/Configuracion'
@@ -55,6 +56,7 @@ function Rutas() {
               <Route path="alertas" element={<Alertas />} />
               <Route path="alertas/:id" element={<AlertaDetalle />} />
               <Route path="costos" element={<Costos />} />
+              <Route path="caja" element={<Caja />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
