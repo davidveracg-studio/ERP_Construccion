@@ -5,6 +5,7 @@ import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
 import { CONFIG_DEFECTO, type Datos } from './datos'
 import { diaSemana } from './fechas'
+import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
 import { hhPorUnidad } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
@@ -59,6 +60,8 @@ interface SpecObra {
   prefijoCC: string
   compromisos: { documento: string; partida: string; tipo: TipoRecurso; proveedor: string; factor: number }[]
   semilla: number
+  /** Ritmo de las cuadrillas respecto del programa (por defecto RITMO_BASE). */
+  ritmo?: number
 }
 
 const MO = (hh: number, precio = 9500): Recurso => ({ tipo: 'MO', descripcion: 'Mano de obra', cantPorUnidad: hh, unidad: 'HH', precio })
@@ -71,6 +74,7 @@ const CUENTA: Record<TipoRecurso | 'GG', string> = { MO: '5-1-00', MAT: '5-1-01'
 
 const OBRA_AROMOS: SpecObra = {
   semilla: 42,
+  ritmo: 1.08,
   inicioHaceDias: 112,
   prefijoCC: 'LA',
   obra: {
@@ -87,10 +91,10 @@ const OBRA_AROMOS: SpecObra = {
   partidas: [
     { codigo: '1.1', capitulo: '1 Obras preliminares', descripcion: 'Instalación de faena', unidad: 'gl', cantidad: 1, puVenta: 45_000_000, recursos: [OTRO('Instalación de faena', 'gl', 38_000_000)], precio: 1.05, proveedor: 'Contenedores del Norte' },
     { codigo: '1.2', capitulo: '1 Obras preliminares', descripcion: 'Trazado y niveles', unidad: 'm²', cantidad: 1200, puVenta: 900, recursos: [MO(0.05, 9000)] },
-    { codigo: '2.1', capitulo: '2 Movimiento de tierra', descripcion: 'Excavación masiva', unidad: 'm³', cantidad: 3200, puVenta: 4200, recursos: [MO(0.08, 9000), EQ('Excavadora', 0.05, 48_000)], consumo: 1.1, proveedor: 'Maquinarias Elqui' },
+    { codigo: '2.1', capitulo: '2 Movimiento de tierra', descripcion: 'Excavación masiva', unidad: 'm³', cantidad: 3200, puVenta: 4200, recursos: [MO(0.08, 9000), EQ('Excavadora', 0.05, 48_000)], consumo: 1.03, proveedor: 'Maquinarias Elqui' },
     { codigo: '2.2', capitulo: '2 Movimiento de tierra', descripcion: 'Relleno compactado', unidad: 'm³', cantidad: 900, puVenta: 29_000, recursos: [MO(0.3, 9000), MAT('Estabilizado', 1.25, 'm³', 16_000), EQ('Placa compactadora', 0.03, 40_000)], proveedor: 'Áridos La Serena' },
     { codigo: '3.1', capitulo: '3 Obra gruesa', descripcion: 'Hormigón fundaciones H-25', unidad: 'm³', cantidad: 420, puVenta: 118_000, recursos: [MO(0.22), MAT('Hormigón H-25', 1.03, 'm³', 92_000)], consumo: 1.02, proveedor: 'Hormigones Sur Ltda.' },
-    { codigo: '3.2', capitulo: '3 Obra gruesa', descripcion: 'Hormigón estructural H-30', unidad: 'm³', cantidad: 1850, puVenta: 128_000, recursos: [MO(0.25), MAT('Hormigón H-30', 1.03, 'm³', 98_000), EQ('Bomba de hormigón', 0.04, 60_000)], consumo: 1.06, precio: 1.02, proveedor: 'Hormigones Sur Ltda.' },
+    { codigo: '3.2', capitulo: '3 Obra gruesa', descripcion: 'Hormigón estructural H-30', unidad: 'm³', cantidad: 1850, puVenta: 128_000, recursos: [MO(0.25), MAT('Hormigón H-30', 1.03, 'm³', 98_000), EQ('Bomba de hormigón', 0.04, 60_000)], consumo: 1.03, proveedor: 'Hormigones Sur Ltda.' },
     { codigo: '3.3', capitulo: '3 Obra gruesa', descripcion: 'Enfierradura', unidad: 'kg', cantidad: 185_000, puVenta: 1380, recursos: [SUB('Subcontrato enfierradura', 'kg', 1150)], proveedor: 'Fierros del Norte SpA' },
     { codigo: '3.4', capitulo: '3 Obra gruesa', descripcion: 'Moldaje', unidad: 'm²', cantidad: 9800, puVenta: 12_500, recursos: [MO(0.55), MAT('Arriendo moldaje', 1, 'm²', 4200)], proveedor: 'Moldajes Pacífico' },
     { codigo: '4.1', capitulo: '4 Albañilería', descripcion: 'Albañilería de ladrillo', unidad: 'm²', cantidad: 2600, puVenta: 29_500, recursos: [MO(0.9), MAT('Ladrillo y mortero', 1, 'm²', 14_500)], proveedor: 'Ladrillos Princesa' },
@@ -103,14 +107,14 @@ const OBRA_AROMOS: SpecObra = {
   actividades: [
     { codigo: 'A01', nombre: 'Instalación de faena', duracion: 10, partidas: [['1.1', 1]], cuadrilla: 'cq_rojas' },
     { codigo: 'A02', nombre: 'Trazado', duracion: 5, pred: ['A01'], partidas: [['1.2', 1200]], cuadrilla: 'cq_rojas' },
-    { codigo: 'A03', nombre: 'Excavación masiva', duracion: 30, pred: ['A02'], partidas: [['2.1', 3200]], cuadrilla: 'cq_rojas', eficiencia: 0.97 },
-    { codigo: 'A05', nombre: 'Fundaciones', duracion: 25, pred: ['A03FC-5'], partidas: [['3.1', 420], ['3.3', 35_000], ['3.4', 1300]], cuadrilla: 'cq_perez', eficiencia: 0.93, factorHH: 1.12 },
+    { codigo: 'A03', nombre: 'Excavación masiva', duracion: 30, pred: ['A02'], partidas: [['2.1', 3200]], cuadrilla: 'cq_rojas' },
+    { codigo: 'A05', nombre: 'Fundaciones', duracion: 25, pred: ['A03FC-5'], partidas: [['3.1', 420], ['3.3', 35_000], ['3.4', 1300]], cuadrilla: 'cq_perez', factorHH: 1.04 },
     { codigo: 'A04', nombre: 'Relleno compactado', duracion: 15, pred: ['A05'], partidas: [['2.2', 900]], cuadrilla: 'cq_rojas' },
-    { codigo: 'A06', nombre: 'Estructura piso 1', duracion: 20, pred: ['A05'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', eficiencia: 0.86, factorHH: 1.25 },
-    { codigo: 'A07', nombre: 'Estructura piso 2', duracion: 20, pred: ['A06'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', eficiencia: 0.85, factorHH: 1.3 },
-    { codigo: 'A08', nombre: 'Estructura piso 3', duracion: 20, pred: ['A07'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', eficiencia: 0.84, factorHH: 1.32 },
-    { codigo: 'A09', nombre: 'Estructura piso 4', duracion: 20, pred: ['A08'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', eficiencia: 0.85, factorHH: 1.3 },
-    { codigo: 'A10', nombre: 'Estructura piso 5 y cubierta', duracion: 20, pred: ['A09'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', eficiencia: 0.85, factorHH: 1.3 },
+    { codigo: 'A06', nombre: 'Estructura piso 1', duracion: 20, pred: ['A05'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', factorHH: 1.06 },
+    { codigo: 'A07', nombre: 'Estructura piso 2', duracion: 20, pred: ['A06'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', factorHH: 1.07 },
+    { codigo: 'A08', nombre: 'Estructura piso 3', duracion: 20, pred: ['A07'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', factorHH: 1.13 },
+    { codigo: 'A09', nombre: 'Estructura piso 4', duracion: 20, pred: ['A08'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', factorHH: 1.07 },
+    { codigo: 'A10', nombre: 'Estructura piso 5 y cubierta', duracion: 20, pred: ['A09'], partidas: [['3.2', 370], ['3.3', 30_000], ['3.4', 1700]], cuadrilla: 'cq_perez', factorHH: 1.07 },
     { codigo: 'H1', nombre: 'Término obra gruesa', duracion: 0, pred: ['A10'], hito: true, contractual: true },
     { codigo: 'A11', nombre: 'Albañilería', duracion: 60, pred: ['A07'], partidas: [['4.1', 2600]], cuadrilla: 'cq_soto', eficiencia: 1.0, factorHH: 0.98 },
     { codigo: 'A12', nombre: 'Instalaciones sanitarias', duracion: 120, pred: ['A07CC+10'], partidas: [['6.1', 1]], cuadrilla: 'cq_rojas' },
@@ -164,6 +168,13 @@ const OBRA_CLINICA: SpecObra = {
     { documento: 'SC-102', partida: '4.2', tipo: 'SUB', proveedor: 'Clima Norte SpA', factor: 58_000_000 },
   ],
 }
+
+/**
+ * Las cuadrillas trabajan algo sobre el ritmo del programa para compensar los días de lluvia
+ * y el día que demora en partir cada actividad tras su predecesora: así una obra con
+ * eficiencia 1 termina al día con su línea base.
+ */
+const RITMO_BASE = 1.1
 
 function parsePred(s: string, ids: Map<string, string>) {
   const m = s.match(/^([A-Z0-9]+?)(FC|CC|FF|CF)?([+-]\d+)?$/)!
@@ -232,7 +243,7 @@ function simular(spec: SpecObra, hoyDia: Dia) {
         const k = `${a.id}|${ap.partidaId}`
         const ya = hecho.get(k) ?? 0
         const tasa = ap.cantidad / (a.duracion * 5 / 7)
-        const prod = Math.min(ap.cantidad - ya, tasa * (s.eficiencia ?? 1) * rand(0.85, 1.15) * (lluvia ? 0.4 : 1))
+        const prod = Math.min(ap.cantidad - ya, tasa * (spec.ritmo ?? RITMO_BASE) * (s.eficiencia ?? 1) * rand(0.85, 1.15) * (lluvia ? 0.4 : 1))
         if (prod > 0) {
           hecho.set(k, ya + prod)
           produccionDia.push({ fecha: d, partidaId: ap.partidaId, cant: prod })
@@ -262,10 +273,11 @@ function simular(spec: SpecObra, hoyDia: Dia) {
       rdos.push({
         id: `rdo_${cid}_${d}`, obraId: obra.id, cuadrillaId: cid, fecha: d,
         clima: lluvia ? 'lluvia' : r() < 0.3 ? 'nublado' : 'despejado',
-        estado: d < hoyDia - 2 ? 'validado' : 'enviado', autor: c.capataz,
-        avances: [...v.avances].map(([partidaId, cantidad]) => ({ partidaId, cantidad: Math.round(cantidad * 100) / 100 })),
+        estado: d < hoyDia - 1 ? 'validado' : 'enviado', autor: c.capataz,
+        // 4 decimales: en partidas globales (cantidad 1) el avance diario es ~0,01 y redondear a 2 lo distorsiona
+        avances: [...v.avances].map(([partidaId, cantidad]) => ({ partidaId, cantidad: Math.round(cantidad * 10_000) / 10_000 })),
         hh, observaciones: lluvia ? 'Lluvia en la mañana, trabajo parcial.' : '',
-        validadoPor: d < hoyDia - 2 ? obra.jefeTerreno : undefined,
+        validadoPor: d < hoyDia - 1 ? obra.jefeTerreno : undefined,
       })
     }
   }
@@ -294,6 +306,9 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   const subAcum = new Map<string, number>()
   for (let v = inicio + 4; v < hoyDia; v += 7) {
     semana++
+    // Generador propio por semana: los costos de semanas pasadas no cambian al avanzar los días
+    const rs = rng(spec.semilla * 1000 + semana)
+    const randSem = (a: number, b: number) => a + (b - a) * rs()
     const lote = `lote_${obra.id}_${semana}`
     const prodSemana = new Map<string, number>()
     for (const x of produccionDia) if (x.fecha > v - 7 && x.fecha <= v) prodSemana.set(x.partidaId, (prodSemana.get(x.partidaId) ?? 0) + x.cant)
@@ -306,7 +321,7 @@ function simular(spec: SpecObra, hoyDia: Dia) {
           subAcum.set(ppid, (subAcum.get(ppid) ?? 0) + q)
           continue
         }
-        const cant = q * rec.cantPorUnidad * (s.consumo ?? 1) * rand(0.99, 1.02)
+        const cant = q * rec.cantPorUnidad * (s.consumo ?? 1) * randSem(0.99, 1.02)
         const precio = rec.precio * (s.precio ?? 1)
         const k = compPorPartida.get(`${ppid}|${rec.tipo}`)
         costos.push({
@@ -336,14 +351,14 @@ function simular(spec: SpecObra, hoyDia: Dia) {
     // Gastos generales semanales y varios sin centro de costo cada 4 semanas
     costos.push({
       id: `co_${obra.id}_GG_${semana}`, obraId: obra.id, fecha: v, partidaId: null, tipo: 'GG',
-      monto: Math.round((obra.ggPresupuesto / obra.plazoDias) * 7 * rand(1.02, 1.07)),
+      monto: Math.round((obra.ggPresupuesto / obra.plazoDias) * 7 * randSem(1.02, 1.07)),
       descripcion: 'Gastos generales de obra (remuneraciones staff, arriendos, consumos)', cuenta: CUENTA.GG,
       centroCosto: `${spec.prefijoCC}-GG`, origen: 'importacion', loteId: lote,
     })
     if (semana % 4 === 0) {
       costos.push({
         id: `co_${obra.id}_VAR_${semana}`, obraId: obra.id, fecha: v, partidaId: null, tipo: 'OTRO',
-        monto: Math.round(rand(400_000, 1_200_000)), descripcion: 'Compras varias ferretería', proveedor: 'Ferretería Central',
+        monto: Math.round(randSem(400_000, 1_200_000)), descripcion: 'Compras varias ferretería', proveedor: 'Ferretería Central',
         cuenta: '5-1-99', centroCosto: `${spec.prefijoCC}-GEN`, origen: 'importacion', loteId: lote,
       })
     }
@@ -362,9 +377,17 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   }
 }
 
+/**
+ * Datos de demostración al día hoyDia. Es determinista (misma fecha → mismos datos e ids):
+ * la demo compartida se renueva cada día y dos visitas simultáneas suben lo mismo.
+ */
 export function generarDemo(hoyDia: Dia): Datos {
+  return conIdsDeterministas(`demo${hoyDia}`, () => generar(hoyDia))
+}
+
+function generar(hoyDia: Dia): Datos {
   const d: Datos = {
-    config: structuredClone(CONFIG_DEFECTO),
+    config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
     compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [],
   }

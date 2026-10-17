@@ -3,6 +3,7 @@
 // navegador) y la función unirse_demo() la agrega como miembro de la empresa demo, así el
 // RLS por membresía sigue aplicando.
 import { create } from 'zustand'
+import { hoy } from '../domain/fechas'
 import { ROLES, type Rol } from '../domain/types'
 import { supabase } from '../lib/supabase'
 import { useStore, USUARIOS } from './store'
@@ -55,8 +56,10 @@ export const useSesion = create<Sesion>()((setS) => ({
       if (error) throw error
       await iniciarSync(empresaId as string, session!.user.id)
       useStore.getState().setSesion(rol, USUARIOS[rol])
-      // Primera vez (o tras vaciar la base): se generan las obras de ejemplo para todos
-      if (useStore.getState().obras.length === 0) useStore.getState().reiniciarDemo()
+      // La demo se genera hasta hoy: la primera visita de cada día la renueva para todos. Es
+      // determinista (misma fecha → mismos datos), así que dos visitas simultáneas suben lo mismo.
+      const s = useStore.getState()
+      if (s.obras.length === 0 || s.config.demoGenerada !== hoy()) s.reiniciarDemo()
       setS({ estado: 'listo' })
     } catch (e) {
       detenerSync()

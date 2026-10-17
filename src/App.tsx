@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'
+import { hoy } from './domain/fechas'
 import { modoNube } from './lib/supabase'
 import { Cargando, IngresoDemo } from './pages/Acceso'
 import Alertas, { AlertaDetalle } from './pages/Alertas'
@@ -82,7 +83,12 @@ function AppNube() {
 /** Modo local (sin variables de Supabase): demo en el navegador. */
 function AppLocal() {
   const [listo, setListo] = useState(useStore.persist.hasHydrated())
-  useEffect(() => useStore.persist.onFinishHydration(() => setListo(true)), [])
+  useEffect(() => {
+    // La demo se renueva cada día para mostrar datos al día (solo si los datos son de la demo)
+    const renovar = () => { const s = useStore.getState(); if (s.config.demoGenerada != null && s.config.demoGenerada !== hoy()) s.reiniciarDemo() }
+    if (useStore.persist.hasHydrated()) renovar()
+    return useStore.persist.onFinishHydration(() => { renovar(); setListo(true) })
+  }, [])
   return listo ? <Rutas /> : <Cargando />
 }
 

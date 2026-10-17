@@ -151,9 +151,9 @@ describe('Demo completa', () => {
     expect(d.periodos.length).toBeGreaterThan(10)
   })
 
-  it('Los Aromos: atrasada, con sobrecosto y alertas de rendimiento', () => {
+  it('Los Aromos: al día, con leve sobrecosto y una alerta de rendimiento', () => {
     const c = calcularObra(d, 'obra_aromos', hoy - 1)
-    expect(c.spi!).toBeLessThan(0.97)
+    expect(c.spi!).toBeGreaterThan(0.9)
     expect(c.cpi!).toBeLessThan(1)
     expect(c.avanceReal).toBeGreaterThan(0.1)
     const reglas = new Set(d.alertas.filter((a) => a.obraId === 'obra_aromos' && a.estado !== 'resuelta').map((a) => a.regla))

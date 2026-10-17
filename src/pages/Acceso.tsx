@@ -33,7 +33,7 @@ export function IngresoDemo() {
         <Boton type="submit" disabled={estado === 'abriendo'} className="w-full justify-center">
           {estado === 'abriendo' ? 'Ingresando…' : 'Ingresar'}
         </Boton>
-        <p className="text-xs text-slate-500">Es una demostración: los datos son ficticios y los comparten todos los que ingresan.</p>
+        <p className="text-xs text-slate-500">Es una demostración: los datos son ficticios, los comparten todos los que ingresan y se renuevan cada día.</p>
       </form>
     </Marco>
   )

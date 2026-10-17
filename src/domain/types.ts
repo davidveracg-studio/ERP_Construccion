@@ -343,6 +343,8 @@ export type Confianza = 'alta' | 'media' | 'baja'
 export interface Config {
   empresa: string
   rut: string
+  /** Día en que se generaron los datos de demostración (la demo se renueva cada día). */
+  demoGenerada?: Dia
   umbrales: {
     spi: [number, number]
     cpi: [number, number]

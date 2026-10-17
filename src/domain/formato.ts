@@ -42,6 +42,21 @@ export function signoPct(v: number | null | undefined): string {
   return `${s}${nf1.format(Math.abs(v) * 100)} %`
 }
 
+let idDeterminista: ((prefijo: string) => string) | null = null
+
 export function uid(prefijo = 'id'): string {
+  if (idDeterminista) return idDeterminista(prefijo)
   return `${prefijo}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`
+}
+
+/** Ejecuta f con ids correlativos derivados de la semilla (misma semilla → mismos ids). */
+export function conIdsDeterministas<T>(semilla: string, f: () => T): T {
+  const anterior = idDeterminista
+  let n = 0
+  idDeterminista = (prefijo) => `${prefijo}_${semilla}_${++n}`
+  try {
+    return f()
+  } finally {
+    idDeterminista = anterior
+  }
 }
