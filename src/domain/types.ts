@@ -337,6 +337,48 @@ export interface Folio {
   respondeA?: string
 }
 
+export type EstadoTarea = 'propuesta' | 'comprometida' | 'en_ejecucion' | 'cumplida' | 'no_cumplida'
+/** Causas de no cumplimiento (11 TareaSemanalNoCumplida). */
+export type CausaNoCumplimiento = 'material' | 'mano_obra' | 'equipo' | 'clima' | 'diseno' | 'subcontratista' | 'tarea_previa' | 'mandante'
+export type TipoRestriccion = 'material' | 'plano' | 'rfi' | 'submittal' | 'equipo' | 'permiso' | 'mano_obra' | 'otra'
+
+/** Restricción de una tarea: hasta liberarse, la tarea no se puede comprometer. */
+export interface Restriccion {
+  id: string
+  tipo: TipoRestriccion
+  descripcion: string
+  responsable: string
+  fechaCompromiso: Dia
+  liberada?: Dia
+  /** Se libera sola cuando el RFI se responde o el submittal se aprueba. */
+  rfiId?: string
+  submittalId?: string
+}
+
+/** Tarea del plan semanal (Last Planner, 08 Tarea Semanal, 10 §8). */
+export interface TareaSemanal {
+  id: string
+  obraId: string
+  /** Lunes de la semana del plan. */
+  semana: Dia
+  descripcion: string
+  partidaId?: string
+  cuadrillaId?: string
+  responsable: string
+  /** Meta de cantidad de la semana (en la unidad de la partida). */
+  meta: number
+  inicio: Dia
+  fin: Dia
+  restricciones: Restriccion[]
+  historial: PasoDoc<EstadoTarea>[]
+  /** Al cierre: cantidad lograda y causa si no se cumplió. */
+  logrado?: number
+  causa?: CausaNoCumplimiento
+  reemplazaA?: string
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */

@@ -21,7 +21,7 @@ export const TABLA: Record<Coleccion, string> = {
   compromisos: 'compromisos', reglasMapeo: 'reglas_mapeo', ajustes: 'ajustes', periodos: 'periodos', alertas: 'alertas',
   estadosPago: 'estados_pago', ordenesCambio: 'ordenes_cambio', obligaciones: 'obligaciones', garantias: 'garantias',
   recepciones: 'recepciones', riesgos: 'riesgos',
-  documentos: 'documentos', rfis: 'rfis', submittals: 'submittals', folios: 'folios',
+  documentos: 'documentos', rfis: 'rfis', submittals: 'submittals', folios: 'folios', tareasSemanales: 'tareas_semanales',
 }
 
 export type EstadoSync = 'inactivo' | 'sincronizando' | 'al_dia' | 'pendiente' | 'sin_conexion' | 'error'

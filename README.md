@@ -44,6 +44,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Registro de riesgos | `/riesgos` — matriz probabilidad × impacto (5×5), exposición en dinero y días, responsable, plan de mitigación con acciones y fechas, reevaluaciones e historial; ciclo identificado → en análisis → abierto ⇄ en mitigación → materializado → cerrado (con impacto real); KRI-01…06 (exposición contra la contingencia disponible y la holgura al término); alertas RULE-610 (crítico sin plan), RULE-611 (revisión vencida) y riesgo materializado | v1.1 · 08, 10 §25, 12, 14 |
 | Planos, RFI y submittals | `/documentos` — planos, EETT y memorias con control de revisiones (una vigente, las demás superadas), archivo adjunto en el bucket `documentos-obra` y confirmación de terreno (RULE-905); RFI borrador → emitido → respondido ⇄ repregunta → cerrado (vincula OC o riesgo; RULE-903, alta si toca la ruta crítica); submittals con aprobación del mandante y revisión siguiente al rechazarse; KDO-01…03 | v1.1 · 08, 10 §26–27, 12, 14 |
 | Libro de Obra | `/libro-obra` — folios numerados, fechados, firmados e inmutables; el ITO (R11) firma como mandante, R02/R03 como contratista; instrucciones y observaciones del ITO esperan respuesta en 3 días hábiles o el plazo indicado (RULE-902) | v1.1 · 08, 19 RN-P03 |
+| Plan semanal (Last Planner) | `/plan-semanal` — tareas por cuadrilla y partida con meta semanal; restricciones (material, plano, RFI, submittal, equipo…) que impiden comprometer, y las de RFI/submittal se liberan solas al responderse o aprobarse; propuesta → comprometida → en ejecución → cumplida / no cumplida (causa obligatoria) y replanificación; lo logrado sale de los RDO; PPC semanal (KPL-04), Pareto de causas, RULE-113 (PPC bajo meta) y RULE-114 (restricción sin liberar a 48 h) | v1.1 · 08, 10 §8, 14 |
 | Portal mandante | `/mandante` (rol R11) — avance en % y curva S, EP y OC por aprobar, RFI y submittals por responder, Libro de Obra, historial; sin costos, márgenes ni alertas internas | v1.1 · 07, 19 §5 |
 | Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
@@ -66,6 +67,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   contrato.ts     Obligaciones y multas, garantías, recepción provisoria/definitiva y estado de la obra
   riesgos.ts      Registro de riesgos: matriz, exposición, transiciones por rol e indicadores KRI
   documental.ts   Planos y revisiones, RFI, submittals, Libro de Obra e indicadores KDO
+  lastPlanner.ts  Plan semanal, restricciones, PPC (KPL-04) y causas de no cumplimiento
   ordenesCambio.ts Órdenes de cambio: etapas, umbral RN-P04, efectos de la aprobación y vigencia de partidas
   estadosPago.ts  Ciclo del EP: etapas, permisos por rol, cubicación, reajuste, indicadores y RULE-403
   caja.ts         Flujo de caja: estados de pago, cobros, pagos, proyección y mínimo a 60 días
@@ -95,4 +97,4 @@ Cada cambio en `main` se publica solo en Vercel (https://erp-construccion-eight.
 - Mover los cálculos (EVM, reglas, cierre de período) a Edge Functions y permisos de escritura por rol en RLS (hoy RLS aísla por empresa; los permisos finos por rol se aplican en la interfaz).
 - Cuentas reales por usuario (correo/SSO) con invitaciones y rol por membresía: el esquema 0001 ya lo soporta (miembros, invitaciones, crear_empresa, aceptar_invitaciones).
 - Importación de MS Project XML (hoy: Excel/CSV con predecesoras), fotos en el RDO, notificaciones push/WhatsApp.
-- Versiones v1.1+ (Last Planner, compras, subcontratos, maquinaria, calidad, seguridad, finanzas).
+- Versiones v1.2+ (compras, subcontratos, maquinaria, calidad, seguridad, finanzas).

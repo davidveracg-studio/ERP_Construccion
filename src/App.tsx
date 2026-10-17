@@ -18,6 +18,7 @@ import OrdenesCambio, { DetalleOC } from './pages/OrdenesCambio'
 import Riesgos, { DetalleRiesgo } from './pages/Riesgos'
 import Documentos, { DetalleRFI, DetalleSubmittal } from './pages/Documentos'
 import LibroObra from './pages/LibroObra'
+import PlanSemanal from './pages/PlanSemanal'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -93,6 +94,7 @@ function Rutas() {
               <Route path="libro-obra" element={<LibroObra />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
+              <Route path="plan-semanal" element={<PlanSemanal />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />
