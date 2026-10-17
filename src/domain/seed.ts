@@ -14,7 +14,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento,
 } from './types'
 
 function rng(seed: number) {
@@ -519,6 +519,118 @@ function contratoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'obligaciones' | 'gara
   }
 }
 
+/**
+ * Plan semanal de la demo, armado con los RDO reales: en cada semana cerrada cada cuadrilla tuvo una tarea
+ * por partida trabajada, con meta bajo lo logrado (cumplida) o sobre lo logrado (no cumplida, con causa).
+ * La semana en curso queda comprometida y la próxima propuesta; las restricciones abiertas (RFI y
+ * submittal) quedan en la semana subsiguiente, lejos del aviso de 48 h.
+ */
+function lastPlannerDemo(d: Datos, hoyDia: Dia): TareaSemanal[] {
+  const out: TareaSemanal[] = []
+  const lunesHoy = hoyDia - ((diaSemana(hoyDia) + 6) % 7)
+  const CAUSAS: CausaNoCumplimiento[] = ['material', 'clima', 'tarea_previa', 'mano_obra', 'equipo', 'diseno']
+  for (const obra of d.obras.filter((o) => o.estado === 'en_ejecucion')) {
+    const partida = (id: string) => d.partidas.find((p) => p.id === id)
+    const cuadrilla = (id: string) => d.cuadrillas.find((c) => c.id === id)
+    const paso = (fecha: Dia, estado: TareaSemanal['historial'][number]['estado'], por: string) => ({ fecha, estado, por })
+    const paso1 = (unidad: string) => (unidad === 'kg' ? 100 : 1)
+    /** Cantidad por cuadrilla, partida y tramo (lun–mié, jue–vie) en los RDO de la semana (sin partidas globales). */
+    const TRAMOS: [number, number][] = [[0, 2], [3, 4]]
+    const pares = (lunes: Dia) => {
+      const m = new Map<string, { cid: string; pid: string; cant: number; desde: number; hasta: number }>()
+      for (const r of d.rdos) {
+        if (r.obraId !== obra.id || r.fecha < lunes || r.fecha > lunes + 4 || r.estado === 'rechazado') continue
+        const [desde, hasta] = TRAMOS.find(([a, b]) => r.fecha - lunes >= a && r.fecha - lunes <= b)!
+        for (const a of r.avances) {
+          const p = partida(a.partidaId)
+          if (!p || p.unidad === 'gl' || a.cantidad <= 0) continue
+          const k = `${r.cuadrillaId}|${a.partidaId}|${desde}`
+          m.set(k, { cid: r.cuadrillaId, pid: a.partidaId, desde, hasta, cant: (m.get(k)?.cant ?? 0) + a.cantidad })
+        }
+      }
+      return [...m.values()].sort((a, b) => a.cid.localeCompare(b.cid) || a.pid.localeCompare(b.pid) || a.desde - b.desde).slice(0, 9)
+    }
+    const DIAS_TRAMO = ['lun–mié', 'jue–vie']
+    const tarea = (lunes: Dia, n: number, cid: string, pid: string, meta: number, extra: Partial<TareaSemanal> = {}, tramo: [number, number] = [0, 4]): TareaSemanal => {
+      const p = partida(pid)!
+      const c = cuadrilla(cid)!
+      const sufijo = tramo[1] - tramo[0] < 4 ? ` (${DIAS_TRAMO[tramo[0] === 0 ? 0 : 1]})` : ''
+      return {
+        id: `ts_${obra.id}_${lunes}_${n}`, obraId: obra.id, semana: lunes, descripcion: `${p.descripcion} · ${c.nombre}${sufijo}`, partidaId: pid, cuadrillaId: cid,
+        responsable: c.capataz, meta, inicio: lunes + tramo[0], fin: lunes + tramo[1], restricciones: [], historial: [], creado: lunes - 4, creadoPor: obra.jefeTerreno, ...extra,
+      }
+    }
+    // Semanas cerradas (hasta 6), con el cierre del viernes
+    let ultimas: ReturnType<typeof pares> = []
+    for (let k = 6; k >= 1; k--) {
+      const lunes = lunesHoy - 7 * k + (hoyDia >= lunesHoy + 5 ? 7 : 0)
+      if (lunes < obra.fechaInicio) continue
+      const ps = pares(lunes)
+      if (!ps.length) continue
+      ultimas = ps
+      const falla = ps.length >= (k === 1 ? 6 : 4) && (k + obra.id.length) % 2 === 0 ? ps.length - 1 : -1
+      ps.forEach((x, n) => {
+        const st = paso1(partida(x.pid)!.unidad)
+        const real = Math.round(x.cant * 100) / 100
+        const meta = n === falla ? Math.ceil((real * 1.25) / st) * st : Math.floor((real * 0.95) / st) * st
+        if (!(meta > 0)) return
+        const c = cuadrilla(x.cid)!
+        out.push(tarea(lunes, n, x.cid, x.pid, meta, {
+          logrado: real, causa: n === falla ? CAUSAS[k % CAUSAS.length] : undefined,
+          historial: [paso(lunes - 3, 'comprometida', obra.jefeTerreno), paso(lunes + x.desde, 'en_ejecucion', c.capataz), paso(lunes + x.hasta, n === falla ? 'no_cumplida' : 'cumplida', obra.jefeTerreno)],
+        }, [x.desde, x.hasta]))
+      })
+    }
+    // Semana en curso (si no terminó) y la siguiente, con las mismas cuadrillas y partidas
+    const actual = hoyDia >= lunesHoy + 5 ? lunesHoy + 7 : lunesHoy
+    ultimas.forEach((x, n) => {
+      const st = paso1(partida(x.pid)!.unidad)
+      const meta = Math.max(st, Math.round(x.cant / st) * st)
+      const c = cuadrilla(x.cid)!
+      const enCurso = actual + x.desde <= hoyDia - 1
+      out.push(tarea(actual, n, x.cid, x.pid, meta, {
+        historial: [paso(actual - 3, 'comprometida', obra.jefeTerreno), ...(enCurso ? [paso(actual + x.desde, 'en_ejecucion', c.capataz)] : [])],
+      }, [x.desde, x.hasta]))
+      // Próxima semana: comprometida si ya pasó la reunión del viernes; restricciones ya liberadas
+      const prox = actual + 7
+      const reunion = actual + 4 <= hoyDia - 1
+      out.push(tarea(prox, n, x.cid, x.pid, meta, {
+        creado: Math.min(actual, hoyDia - 1),
+        historial: reunion ? [paso(actual + 4, 'comprometida', obra.jefeTerreno)] : [],
+        restricciones: n === 0 ? [{
+          id: 'rx1', tipo: 'material', descripcion: `Material disponible en bodega para ${partida(x.pid)!.descripcion.toLowerCase()}`, responsable: obra.administrador,
+          fechaCompromiso: Math.min(actual + 2, hoyDia - 1), liberada: Math.min(actual + 1, hoyDia - 1),
+        }] : [],
+      }, [x.desde, x.hasta]))
+    })
+    // Semana subsiguiente: tareas con restricciones abiertas de RFI y submittal (lookahead)
+    const lookahead = actual + 14
+    const rx = (id: string, tipo: Restriccion['tipo'], descripcion: string, responsable: string, extra: Partial<Restriccion>): Restriccion =>
+      ({ id, tipo, descripcion, responsable, fechaCompromiso: lookahead - 3, ...extra })
+    if (obra.id === 'obra_aromos' && ultimas.length) {
+      const cid = ultimas.find((x) => x.pid.endsWith('p3.2'))?.cid ?? ultimas[0].cid
+      out.push(tarea(lookahead, 0, cid, `${obra.id}_p3.2`, 60, {
+        descripcion: 'Hormigonado de vigas del piso 5', creado: hoyDia - 1,
+        restricciones: [
+          rx('rx1', 'rfi', 'Respuesta del RFI N° 5 (anclajes de vigas)', obra.oficinaTecnica, { rfiId: `rfi_${obra.id}_5` }),
+          rx('rx2', 'equipo', 'Bomba de hormigón reservada', obra.administrador, { liberada: hoyDia - 1 }),
+        ],
+      }))
+      out.push(tarea(lookahead, 1, 'cq_soto', `${obra.id}_p4.1`, 120, {
+        descripcion: 'Antepechos de balcones con anclajes de barandas', creado: hoyDia - 1,
+        restricciones: [rx('rx1', 'submittal', 'Aprobación del plano de taller de barandas (submittal N° 3)', obra.oficinaTecnica, { submittalId: `sub_${obra.id}_3_0` })],
+      }))
+    }
+    if (obra.id === 'obra_clinica' && ultimas.length) {
+      out.push(tarea(lookahead, 0, ultimas[0].cid, `${obra.id}_p3.1`, 150, {
+        descripcion: 'Pavimento vinílico en pabellones', creado: hoyDia - 1,
+        restricciones: [rx('rx1', 'submittal', 'Aprobación de la muestra de pavimento vinílico (submittal N° 2)', obra.oficinaTecnica, { submittalId: `sub_${obra.id}_2_0` })],
+      }))
+    }
+  }
+  return out
+}
+
 /** Gestión documental de la demo: planos con revisiones al día en terreno, RFI, submittals y Libro de Obra, sin vencidos. */
 function documentalDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'documentos' | 'rfis' | 'submittals' | 'folios'> {
   const obra = (id: string) => d.obras.find((o) => o.id === id)!
@@ -875,7 +987,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 7
+export const VERSION_DEMO = 8
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -894,7 +1006,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -930,6 +1042,8 @@ function generar(hoyDia: Dia): Datos {
   d.riesgos.push(...riesgosDemo(d, hoyDia))
   // Planos, RFI, submittals y Libro de Obra
   Object.assign(d, documentalDemo(d, hoyDia))
+  // Plan semanal Last Planner (sale de los RDO)
+  d.tareasSemanales = lastPlannerDemo(d, hoyDia)
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

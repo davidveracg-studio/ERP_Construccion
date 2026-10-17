@@ -18,11 +18,14 @@ import {
   accionesRFI, accionesSubmittal, aplicarAccionRFI, aplicarAccionSubmittal, emisorFolio, estadoRFI, estadoSubmittal, nuevaRevisionSubmittal,
   puedeConfirmarTerreno, puedeCrearRFI, puedeCrearSubmittal, puedePublicarDocumento, revisionVigente, type AccionRFI, type AccionSubmittal,
 } from '../domain/documental'
+import {
+  accionesTarea, aplicarAccionTarea, estadoTarea, puedeGestionarRestricciones, puedePlanificar, replanificar, type AccionTarea,
+} from '../domain/lastPlanner'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento,
 } from '../domain/types'
 
 export interface UI {
@@ -113,6 +116,13 @@ export interface Acciones {
   accionSubmittal: (id: string, accion: AccionSubmittal, datos?: { texto?: string }) => { error?: string; nuevaRevision?: string }
   /** Agrega un folio al Libro de Obra (inmutable). */
   registrarFolio: (f: Pick<Folio, 'obraId' | 'tipo' | 'texto' | 'plazoRespuesta' | 'respondeA'>) => string | null
+  /** Propone una tarea para el plan semanal. */
+  crearTarea: (x: Pick<TareaSemanal, 'obraId' | 'semana' | 'descripcion' | 'partidaId' | 'cuadrillaId' | 'responsable' | 'meta' | 'inicio' | 'fin'>) => string | null
+  agregarRestriccion: (tareaId: string, r: Omit<Restriccion, 'id' | 'liberada'>) => string | null
+  liberarRestriccion: (tareaId: string, restriccionId: string) => string | null
+  accionTarea: (id: string, accion: AccionTarea, datos?: { logrado?: number; causa?: CausaNoCumplimiento; nota?: string }) => string | null
+  /** Crea en la semana siguiente una tarea con lo que faltó de una no cumplida. */
+  replanificarTarea: (id: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -544,6 +554,59 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ folios: [...x.folios, { ...f, id: uid('fol'), numero, fecha: t, autor: s.ui.usuario, emisor, texto: f.texto.trim() }] }))
           return null
         },
+        crearTarea: (x) => {
+          const s = getS()
+          if (!puedePlanificar(s.ui.rol)) return 'Planifican el jefe de terreno y el administrador de obra.'
+          if (!x.descripcion.trim() || !x.responsable.trim()) return 'Indica la tarea y el responsable.'
+          if (!(x.meta > 0)) return 'Indica la meta de la semana.'
+          if (x.fin < x.inicio) return 'El término no puede ser anterior al inicio.'
+          if (x.inicio < x.semana || x.fin > x.semana + 6) return 'Las fechas deben quedar dentro de la semana.'
+          mutar((st) => ({ tareasSemanales: [...st.tareasSemanales, { ...x, id: uid('ts'), descripcion: x.descripcion.trim(), restricciones: [], historial: [], creado: hoy(), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        agregarRestriccion: (tareaId, r) => {
+          const s = getS()
+          const x = s.tareasSemanales.find((y) => y.id === tareaId)
+          if (!x) return 'La tarea no existe.'
+          if (!puedeGestionarRestricciones(s.ui.rol)) return 'Tu rol no puede registrar restricciones.'
+          if (!['propuesta', 'comprometida'].includes(estadoTarea(x, hoy()) ?? '')) return 'Solo se agregan restricciones a tareas por iniciar.'
+          if (!r.descripcion.trim() || !r.responsable.trim()) return 'Indica la restricción y quién la libera.'
+          mutar((st) => ({ tareasSemanales: st.tareasSemanales.map((y) => (y.id === tareaId ? { ...y, restricciones: [...y.restricciones, { ...r, id: uid('rx'), descripcion: r.descripcion.trim() }] } : y)) }))
+          return null
+        },
+        liberarRestriccion: (tareaId, restriccionId) => {
+          const s = getS()
+          if (!puedeGestionarRestricciones(s.ui.rol)) return 'Tu rol no puede liberar restricciones.'
+          const t = hoy()
+          mutar((st) => ({
+            tareasSemanales: st.tareasSemanales.map((y) => (y.id !== tareaId ? y : { ...y, restricciones: y.restricciones.map((r) => (r.id === restriccionId ? { ...r, liberada: t } : r)) })),
+          }))
+          return null
+        },
+        accionTarea: (id, accion, datos = {}) => {
+          const s = getS()
+          const x = s.tareasSemanales.find((y) => y.id === id)
+          if (!x) return 'La tarea no existe.'
+          const t = hoy()
+          if (!accionesTarea(x, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            const nueva = aplicarAccionTarea(x, accion, { ...datos, fecha: t, autor: s.ui.usuario, ctx: { rfis: s.rfis, submittals: s.submittals } })
+            mutar((st) => ({ tareasSemanales: st.tareasSemanales.map((y) => (y.id === id ? nueva : y)) }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
+        replanificarTarea: (id) => {
+          const s = getS()
+          const x = s.tareasSemanales.find((y) => y.id === id)
+          if (!x || estadoTarea(x, hoy()) !== 'no_cumplida') return 'Solo se replanifica una tarea no cumplida.'
+          if (!puedePlanificar(s.ui.rol)) return 'Planifican el jefe de terreno y el administrador de obra.'
+          if (s.tareasSemanales.some((y) => y.reemplazaA === id)) return 'Esta tarea ya se replanificó.'
+          const nueva = replanificar(x, uid('ts'), hoy(), s.ui.usuario)
+          mutar((st) => ({ tareasSemanales: [...st.tareasSemanales, nueva] }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -551,7 +614,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 10,
+      version: 11,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

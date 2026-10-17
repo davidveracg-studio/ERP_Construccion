@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { CAUSAS_CNC, indicadoresLP, PPC_ALERTA, PPC_ROJO, restriccionesAbiertas, restriccionUrgente, TIPOS_RESTRICCION } from './lastPlanner'
 import { DESTINATARIOS_RFI, folioPendiente, partidasCriticas, rfiVencido, terrenoDesactualizado, tocaCriticas, revisionVigente, TIPOS_FOLIO } from './documental'
 import { ETAPAS_OC, etapaOC } from './ordenesCambio'
 import { CATEGORIAS_RIESGO, diasSinPlan, DIAS_PLAN_CRITICO, ESCALA, estadoRiesgo, evaluacionVigente, exposicionRiesgo, NIVELES, revisionVencida } from './riesgos'
@@ -38,6 +39,8 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-107': 'Hito en riesgo o vencido',
   'RULE-108': 'Actividad crítica atrasada',
   'RULE-109': 'Avance rezagado respecto del plazo',
+  'RULE-113': 'PPC semanal bajo meta',
+  'RULE-114': 'Restricción sin liberar a 48 h del inicio',
   'RULE-110': 'Registro de HH inconsistente',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-402': 'Estado de pago vencido',
@@ -422,6 +425,39 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       porQue: e === 'vencida' ? 'La garantía venció sin renovarse: puede ser causal de incumplimiento del contrato.' : `La garantía vence en ${g.vencimiento - c.corte} días.`,
       accionRequerida: 'Solicitar la renovación al banco o aseguradora y entregarla al mandante antes del vencimiento.',
       responsable: o.administrador,
+    })
+  }
+
+  // Last Planner (v1.1): RULE-113 PPC de la última semana cerrada bajo meta y RULE-114 restricción sin liberar a 48 h
+  const tareas = d.tareasSemanales.filter((x) => x.obraId === o.id)
+  const ctxLP = { rfis: d.rfis, submittals: d.submittals }
+  const lp = indicadoresLP(tareas, ctxLP, c.corte)
+  if (lp.ultima?.ppc != null && lp.ultima.ppc < PPC_ALERTA)
+    out.push({
+      regla: 'RULE-113', clave: `RULE-113|${lp.ultima.lunes}`, severidad: lp.ultima.ppc < PPC_ROJO ? 'alta' : 'media',
+      titulo: `PPC de la semana del ${fmtFecha(lp.ultima.lunes)}: ${pct(lp.ultima.ppc, 0)}`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Cumplidas / comprometidas', valor: `${lp.ultima.cumplidas} / ${lp.ultima.comprometidas}` },
+        ...(lp.causas[0] ? [{ etiqueta: 'Causa principal (8 semanas)', valor: `${CAUSAS_CNC[lp.causas[0].causa]} (${lp.causas[0].n})` }] : []),
+      ],
+      porQue: 'Menos del 70 % de lo comprometido en la reunión semanal se cumplió.',
+      queProvoca: 'Un plan que no se cumple deja de ser confiable: el avance real se aleja del programa y se pierde productividad.',
+      accionRequerida: 'Revisar las causas de no cumplimiento en la reunión semanal y comprometer solo tareas sin restricciones.',
+      responsable: o.jefeTerreno, kpi: 'KPL-04', valorKpi: lp.ultima.ppc,
+    })
+  const partCriticasLP = partidasCriticas(c)
+  for (const x of tareas.filter((y) => restriccionUrgente(y, ctxLP, c.corte))) {
+    const abiertas = restriccionesAbiertas(x, ctxLP, c.corte)
+    const critica = !!x.partidaId && partCriticasLP.has(x.partidaId)
+    out.push({
+      regla: 'RULE-114', clave: `RULE-114|${x.id}`, severidad: critica ? 'alta' : 'media', titulo: `Restricción sin liberar: ${x.descripcion}`, entidad: `${o.nombre} · ${x.responsable}`,
+      datos: [
+        { etiqueta: 'Inicio de la tarea', valor: fmtFecha(x.inicio) },
+        ...abiertas.map((r) => ({ etiqueta: TIPOS_RESTRICCION[r.tipo], valor: `${r.descripcion} (${r.responsable})` })),
+      ],
+      porQue: `La tarea parte el ${fmtFecha(x.inicio)} y tiene ${abiertas.length} restricción(es) sin liberar.${critica ? ' Es de la ruta crítica.' : ''}`,
+      accionRequerida: 'Liberar la restricción o sacar la tarea del plan y reasignar a la cuadrilla.',
+      responsable: abiertas[0]?.responsable ?? o.jefeTerreno,
     })
   }
 
