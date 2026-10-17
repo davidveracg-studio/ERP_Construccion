@@ -36,6 +36,7 @@ const NAV: Item[] = [
   { to: '/caja', etiqueta: 'Flujo de caja', roles: ['R01', 'R02', 'R05'], icono: '≋' },
   { to: '/estados-pago', etiqueta: 'Estados de pago', roles: ['R01', 'R02', 'R05'], icono: '▦' },
   { to: '/ordenes-cambio', etiqueta: 'Órdenes de cambio', roles: ['R01', 'R02', 'R05'], icono: '±' },
+  { to: '/contrato', etiqueta: 'Contrato y garantías', roles: ['R01', 'R02', 'R05'], icono: '§' },
   { to: '/mandante', etiqueta: 'Portal mandante', roles: ['R11', 'R02'], icono: '⌂' },
   { to: '/programa', etiqueta: 'Carta Gantt', roles: ['R01', 'R02', 'R03', 'R05'], icono: '▤' },
   { to: '/4d', etiqueta: 'Simulación 4D', roles: ['R01', 'R02', 'R03', 'R05', 'R11'], icono: '◆' },

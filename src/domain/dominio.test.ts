@@ -106,7 +106,7 @@ function obraMinima(): Datos {
       hh: [{ partidaId: 'p', trabajadores: 5, horasNormales: 8, horasExtra: 0 }], // 40 HH para 20 m³ = 2,0 HH/m³? no: 40/20 = 2
     }],
     costos: [{ id: 'k', obraId: 'o', fecha: obra.fechaInicio + 9, partidaId: 'p', tipo: 'MAT', cantidad: 21, precio: 105_000, monto: 21 * 105_000, descripcion: 'H-30', origen: 'manual' }],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [],
   }
 }
 
@@ -146,7 +146,7 @@ describe('Demo completa', () => {
   const d = generarDemo(hoy)
 
   it('genera obras, RDO, costos y períodos', () => {
-    expect(d.obras.length).toBe(2)
+    expect(d.obras.length).toBe(3)
     expect(d.rdos.length).toBeGreaterThan(100)
     expect(d.periodos.length).toBeGreaterThan(10)
   })

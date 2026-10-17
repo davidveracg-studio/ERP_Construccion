@@ -40,6 +40,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Alertas y acciones | `/alertas` — 14 reglas del núcleo (RULE-101…609), acciones correctivas con verificación automática de efectividad | 10 §28, 12 |
 | Estados de pago | `/estados-pago` — ciclo completo de 10 §9 (borrador → revisión interna → presentado ⇄ observado con versiones → aprobado → facturado → pago parcial/pagado, anulación), cubicación con generadores, reajuste por índice, descuentos y multas, IVA; KFI-01/02/10 y RULE-403 | v1.1 · 10 §9, 08 |
 | Órdenes de cambio | `/ordenes-cambio` — aumento, obra extraordinaria, deductivo y plazo; valorización, aprobación interna (Gerencia sobre el 5 % del contrato) y del mandante; al aprobarse ajusta cantidades vigentes, venta, presupuesto y plazo; las partidas extraordinarias no cuentan ni se cobran hasta la aprobación del mandante; alerta RULE-105 (trabajo en riesgo de no pago) | v1.1 · 10 §10, 12 |
+| Contrato y garantías | `/contrato` — monto y plazo vigentes con órdenes de cambio; obligaciones con multa (RULE-904); garantías vigente → por vencer → vencida, renovada, devuelta o cobrada (RULE-404); recepción provisoria con observaciones, subsanación y V°B° del mandante, y definitiva (la obra pasa a en garantía y cerrada); exposición a multas con tope | v1.1 · 10 §16 y §20, 12 |
 | Portal mandante | `/mandante` (rol R11) — avance en % y curva S, EP por aprobar con Aprobar/Observar, historial; sin costos, márgenes ni alertas internas | v1.1 · 07, 19 §5 |
 | Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
@@ -59,6 +60,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   cpm.ts          Ruta crítica, holguras, proyección con reales y límites de hitos
   evm.ts          EVM por partida/obra, forecast, provisión de subcontratos, HH, confianza de datos
   modelo4d.ts     Modelo 4D: inferencia desde el programa, avance por capa/piso y línea de tiempo
+  contrato.ts     Obligaciones y multas, garantías, recepción provisoria/definitiva y estado de la obra
   ordenesCambio.ts Órdenes de cambio: etapas, umbral RN-P04, efectos de la aprobación y vigencia de partidas
   estadosPago.ts  Ciclo del EP: etapas, permisos por rol, cubicación, reajuste, indicadores y RULE-403
   caja.ts         Flujo de caja: estados de pago, cobros, pagos, proyección y mínimo a 60 días

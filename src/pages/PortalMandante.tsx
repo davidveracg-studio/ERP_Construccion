@@ -12,6 +12,7 @@ import { mm, pct, pp } from '../domain/formato'
 import { useCalc } from '../store/hooks'
 import { EtapaBadge } from './EstadosPago'
 import { EtapaOCBadge } from './OrdenesCambio'
+import { DetalleRecepcion } from './Contrato'
 import { etapaOC, montosOC, TIPOS_OC } from '../domain/ordenesCambio'
 
 export default function PortalMandante() {
@@ -24,6 +25,7 @@ export default function PortalMandante() {
   // El mandante ve las órdenes desde que se le presentan
   const ocs = d.ordenesCambio.filter((o) => o.obraId === c.obra.id && o.presentada != null && o.presentada <= t).sort((a, b) => b.numero - a.numero)
   const ocsPorAprobar = ocs.filter((o) => etapaOC(o, t) === 'presentada')
+  const recepciones = d.recepciones.filter((r) => r.obraId === c.obra.id && r.fecha <= t).sort((a, b) => a.fecha - b.fecha)
   const ind = indicadoresEP(eps, t)
   const aprobado = eps.filter((e) => e.aprobado != null && e.aprobado <= t).reduce((s, e) => s + e.neto, 0)
   const pagado = eps.reduce((s, e) => s + pagadoHasta(e, t), 0)
@@ -79,6 +81,13 @@ export default function PortalMandante() {
           </p>
         </Card>
       </div>
+
+      {recepciones.length > 0 && (
+        <Card titulo="Recepción de la obra">
+          {recepciones.map((r) => <DetalleRecepcion key={r.id} r={r} t={t} />)}
+          <p className="mt-2 text-xs text-slate-500">Cuando la constructora subsana una observación, usted da su V°B° para cerrarla.</p>
+        </Card>
+      )}
 
       <Card titulo="Órdenes de cambio">
         {ocs.length === 0 ? <p className="text-sm text-slate-500">Sin órdenes de cambio presentadas.</p> : (

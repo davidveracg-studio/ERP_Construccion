@@ -92,7 +92,7 @@ export interface OrdenCambio {
   devoluciones: { fecha: Dia; autor: string; texto: string }[]
 }
 
-export type EstadoObra = 'planificacion' | 'en_ejecucion' | 'paralizada' | 'terminada'
+export type EstadoObra = 'planificacion' | 'en_ejecucion' | 'paralizada' | 'terminada' | 'recepcion_provisoria' | 'en_garantia' | 'cerrada'
 
 export interface Obra {
   id: string
@@ -114,6 +114,66 @@ export interface Obra {
   modelo4d?: Modelo4D
   /** Condiciones de pago del contrato; si no hay, se usan las de CONDICIONES_PAGO_DEFECTO. */
   condicionesPago?: CondicionesPago
+  /** Tope de multas del contrato como fracción de la venta (por defecto 10 %). */
+  topeMultas?: number
+}
+
+export type TipoObligacion = 'garantia' | 'programa' | 'planos' | 'poliza' | 'informe' | 'respuesta' | 'otra'
+
+/** Compromiso del contrato con fecha (08 Obligación Contractual): responsable, estado y multa si aplica. */
+export interface Obligacion {
+  id: string
+  obraId: string
+  tipo: TipoObligacion
+  titulo: string
+  responsable: string
+  fechaLimite: Dia
+  multa?: { tipo: 'diaria' | 'fija'; monto: number }
+  cumplida?: Dia
+  evidencia?: string
+  creada: Dia
+}
+
+export type ObjetoGarantia = 'fiel_cumplimiento' | 'anticipo' | 'correcta_ejecucion' | 'canje_retenciones' | 'seriedad_oferta'
+
+/** Garantía entregada al mandante (08 Garantía Contractual, 10 §20). */
+export interface Garantia {
+  id: string
+  obraId: string
+  tipo: 'boleta' | 'poliza' | 'vale_vista'
+  objeto: ObjetoGarantia
+  numero: string
+  emisor: string
+  monto: number
+  emision: Dia
+  vencimiento: Dia
+  /** Garantía anterior que esta renueva. */
+  reemplazaA?: string
+  devuelta?: Dia
+  cobrada?: Dia
+  creada: Dia
+}
+
+export interface ObservacionRecepcion {
+  id: string
+  texto: string
+  plazo: Dia
+  subsanada?: Dia
+  /** V°B° del mandante/ITO a la subsanación. */
+  vistoBueno?: Dia
+}
+
+/** Recepción provisoria o definitiva de la obra (10 §16). */
+export interface RecepcionObra {
+  id: string
+  obraId: string
+  tipo: 'provisoria' | 'definitiva'
+  fecha: Dia
+  acta?: string
+  resultado: 'recibida' | 'rechazada'
+  motivoRechazo?: string
+  observaciones: ObservacionRecepcion[]
+  registradaPor: string
 }
 
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
