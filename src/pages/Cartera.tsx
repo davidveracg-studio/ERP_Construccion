@@ -25,9 +25,10 @@ export default function Cartera() {
       .sort((a, b) => a.c.vac - b.c.vac)
   }, [d])
   const tot = filas.reduce(
-    (s, f) => ({ venta: s.venta + f.c.venta, resultado: s.resultado + f.c.resultado, vac: s.vac + f.c.vac, backlog: s.backlog + f.c.venta * (1 - f.c.avanceReal) }),
-    { venta: 0, resultado: 0, vac: 0, backlog: 0 },
+    (s, f) => ({ venta: s.venta + f.c.venta, resultado: s.resultado + f.c.resultado, vac: s.vac + f.c.vac, bac: s.bac + f.c.bac, backlog: s.backlog + f.c.venta * (1 - f.c.avanceReal) }),
+    { venta: 0, resultado: 0, vac: 0, bac: 0, backlog: 0 },
   )
+  const u = d.config.umbrales
   const ir = (id: string, ruta: string) => { setObra(id); nav(ruta) }
 
   return (
@@ -37,7 +38,9 @@ export default function Cartera() {
         <Kpi etiqueta="Obras en ejecución" valor={filas.filter((f) => f.o.estado === 'en_ejecucion').length} />
         <Kpi etiqueta="Venta contratada" valor={mm(tot.venta)} sub={`Backlog ${mm(tot.backlog)}`} />
         <Kpi etiqueta="Resultado proyectado" valor={mm(tot.resultado)} sub={`Margen ${pct(tot.venta ? tot.resultado / tot.venta : 0)}`} />
-        <Kpi etiqueta="VAC consolidado" valor={mm(tot.vac)} estado={tot.vac < 0 ? 'rojo' : 'verde'} ayuda="Presupuesto − costo estimado a término" />
+        {/* Mismos umbrales que la alerta de VAC por obra (RULE-608), sobre el presupuesto de la cartera */}
+        <Kpi etiqueta="VAC consolidado" valor={mm(tot.vac)} sub={tot.bac ? signoPct(tot.vac / tot.bac) : undefined}
+          estado={tot.vac >= -u.vac[0] * tot.bac ? 'verde' : tot.vac >= -u.vac[1] * tot.bac ? 'amarillo' : 'rojo'} ayuda="Presupuesto − costo estimado a término" />
       </div>
 
       <Card titulo="Semáforo por obra">
