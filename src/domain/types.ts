@@ -65,6 +65,28 @@ export interface Obra {
   /** Presupuesto de gastos generales (indirectos) total. */
   ggPresupuesto: number
   estado: EstadoObra
+  /** Modelo 4D guardado; si no existe se infiere desde el programa. */
+  modelo4d?: Modelo4D
+}
+
+/** Capa constructiva del modelo 4D paramétrico. */
+export type Capa = 'terreno' | 'fundaciones' | 'estructura' | 'muros' | 'instalaciones' | 'terminaciones'
+
+/** Actividad del programa enlazada a una capa de uno o más pisos (piso 0 = nivel de terreno). */
+export interface EnlaceModelo {
+  actividadId: string
+  capa: Capa
+  pisos: number[]
+}
+
+/** Modelo 4D paramétrico: el edificio se genera desde la planta y el número de pisos. */
+export interface Modelo4D {
+  pisos: number
+  /** Planta en metros. */
+  largo: number
+  ancho: number
+  alturaPiso: number
+  enlaces: EnlaceModelo[]
 }
 
 export type TipoDependencia = 'FC' | 'CC' | 'FF' | 'CF'

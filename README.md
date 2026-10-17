@@ -40,6 +40,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Alertas y acciones | `/alertas` — 14 reglas del núcleo (RULE-101…609), acciones correctivas con verificación automática de efectividad | 10 §28, 12 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
 | Carta Gantt | `/programa` — línea base vs proyectado, ruta crítica (CPM con FC/CC/FF/CF, desfases y hitos contractuales como fecha límite), re-baseline con aprobación de R01 | 10 §23, RF-PLA |
+| Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (contorno de línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación; modelo inferido de los nombres de actividades y editable | fase 1 (fase 2: importar IFC) |
 | RDO del capataz | `/rdo` — móvil, avance en cantidades + HH por partida + HH no productivas | 17 §4.1, 20 §6.1 |
 | Validación y rendimientos | `/terreno` — el jefe de terreno valida/devuelve; HH/unidad real vs APU por cuadrilla | 10 §5 |
 | Cierre semanal | `/cierre` — checklist de completitud, snapshot inmutable, evaluación de reglas | 17 §4.2 |
@@ -53,6 +54,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 src/domain/     Motor puro en TypeScript (sin React): lo que en producción correría en Edge Functions
   cpm.ts          Ruta crítica, holguras, proyección con reales y límites de hitos
   evm.ts          EVM por partida/obra, forecast, provisión de subcontratos, HH, confianza de datos
+  modelo4d.ts     Modelo 4D paramétrico: inferencia desde el programa, avance por elemento y línea de tiempo
   explicacion.ts  Descomposición determinista de desviaciones (suma = AC − EV) y Paretos
   reglas.ts       Reglas de alerta temprana del MVP
   periodos.ts     Cierre de período: snapshot, ciclo de vida de alertas, efectividad de acciones
