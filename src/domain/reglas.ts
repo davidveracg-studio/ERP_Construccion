@@ -1,6 +1,7 @@
 // Reglas del núcleo de alerta temprana (12). Se evalúan al cerrar el período de control.
 import type { Datos } from './datos'
 import type { CalcObra } from './evm'
+import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
 import { ETAPAS_OC, etapaOC } from './ordenesCambio'
 import { desglosePartida, paretoActividades, paretoCuadrillas } from './explicacion'
@@ -39,7 +40,9 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-402': 'Estado de pago vencido',
   'RULE-403': 'Estado de pago no presentado a tiempo',
+  'RULE-404': 'Garantía por vencer o vencida',
   'RULE-601': 'Margen proyectado bajo mínimo',
+  'RULE-904': 'Obligación contractual por vencer o vencida',
   'RULE-602': 'CPI bajo umbral',
   'RULE-603': 'Caja proyectada negativa',
   'RULE-605': 'Desviación proyectada por partida',
@@ -130,9 +133,9 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
     })
   }
 
-  // RULE-109
+  // RULE-109 (una obra terminada no está rezagada aunque haya consumido todo el plazo)
   const brecha = c.plazoConsumido - c.avanceReal
-  if (brecha > u.avanceVsPlazoPp[0])
+  if (brecha > u.avanceVsPlazoPp[0] && c.avanceReal < 0.999)
     out.push({
       regla: 'RULE-109', clave: 'RULE-109', severidad: brecha > u.avanceVsPlazoPp[1] ? 'alta' : 'media',
       titulo: `Avance ${pct(c.avanceReal)} con ${pct(c.plazoConsumido)} del plazo consumido`, entidad: o.nombre,
@@ -374,6 +377,45 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       accionRequerida: 'Preparar, revisar y presentar el estado de pago del período.',
       responsable: o.oficinaTecnica,
     })
+
+  // RULE-904 (v1.1): obligaciones del contrato por vencer (≤ 10 días) o vencidas
+  for (const ob of d.obligaciones.filter((x) => x.obraId === o.id)) {
+    const e = estadoObligacion(ob, c.corte)
+    if (e !== 'por_vencer' && e !== 'vencida') continue
+    const multa = multaDevengada(ob, c.corte)
+    out.push({
+      regla: 'RULE-904', clave: `RULE-904|${ob.id}`, severidad: e === 'vencida' || ob.multa ? 'alta' : 'media',
+      titulo: `${e === 'vencida' ? 'Obligación vencida' : 'Obligación por vencer'}: ${ob.titulo}`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Fecha límite', valor: fmtFecha(ob.fechaLimite) },
+        { etiqueta: e === 'vencida' ? 'Días de atraso' : 'Días restantes', valor: `${Math.abs(ob.fechaLimite - c.corte)}` },
+        ...(ob.multa ? [{ etiqueta: ob.multa.tipo === 'diaria' ? 'Multa diaria' : 'Multa', valor: mm(ob.multa.monto) }] : []),
+        ...(multa > 0 ? [{ etiqueta: 'Multa devengada', valor: mm(multa) }] : []),
+      ],
+      porQue: e === 'vencida' ? `La obligación venció el ${fmtFecha(ob.fechaLimite)} y no está cumplida.` : `La obligación vence en ${ob.fechaLimite - c.corte} días.`,
+      accionRequerida: e === 'vencida' ? 'Cumplir la obligación y negociar con el mandante la multa devengada.' : 'Preparar y entregar a tiempo lo comprometido.',
+      responsable: ob.responsable,
+    })
+  }
+
+  // RULE-404 (v1.1): garantías entregadas al mandante por vencer (≤ 30 días) o vencidas
+  const garantias = d.garantias.filter((x) => x.obraId === o.id)
+  for (const g of garantias) {
+    const e = estadoGarantia(g, garantias, c.corte)
+    if (e !== 'por_vencer' && e !== 'vencida') continue
+    out.push({
+      regla: 'RULE-404', clave: `RULE-404|${g.id}`, severidad: e === 'vencida' ? 'critica' : 'alta',
+      titulo: `Garantía ${e === 'vencida' ? 'vencida' : 'por vencer'}: ${OBJETOS_GARANTIA[g.objeto]}`, entidad: `${TIPOS_GARANTIA[g.tipo]} N° ${g.numero}`,
+      datos: [
+        { etiqueta: 'Emisor', valor: g.emisor },
+        { etiqueta: 'Monto', valor: mm(g.monto) },
+        { etiqueta: 'Vencimiento', valor: fmtFecha(g.vencimiento) },
+      ],
+      porQue: e === 'vencida' ? 'La garantía venció sin renovarse: puede ser causal de incumplimiento del contrato.' : `La garantía vence en ${g.vencimiento - c.corte} días.`,
+      accionRequerida: 'Solicitar la renovación al banco o aseguradora y entregarla al mandante antes del vencimiento.',
+      responsable: o.administrador,
+    })
+  }
 
   // RULE-609
   if (anterior) {

@@ -9,6 +9,7 @@ import { programaDe, type Datos } from './datos'
 import { calcularObraPlan, costoRegistro, type CalcObra } from './evm'
 import { finDeMes } from './fechas'
 import { puCostoTipo } from './presupuesto'
+import { recepcionProvisoria } from './contrato'
 import { anticipoPorAmortizar, DIAS_PREPARACION_EP, epVencido, etapaEP, montosEP, pagadoHasta, presentadoEn, vigente } from './estadosPago'
 import type { CondicionesPago, Dia, EstadoPago, EstadoSemaforo, Partida } from './types'
 
@@ -154,7 +155,11 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
     add(Math.max(corte + DIAS_PREPARACION_EP + cond.diasAprobacion + 1 + cond.diasPago, T + 7), m.neto, 'cobro_ep', `EP N° ${numero++} (estimado)`, 'estimado')
     previo = valor
   }
-  if (retenido > 0) add(finProy + cond.diasDevolucionRetencion, retenido, 'retencion', 'Devolución de retenciones al término', 'estimado')
+  // Las retenciones se devuelven tras la recepción provisoria (o el término proyectado si aún no hay)
+  const recepcion = recepcionProvisoria(d.recepciones, obra.id, T)
+  if (retenido > 0)
+    add(Math.max((recepcion?.fecha ?? finProy) + cond.diasDevolucionRetencion, T + 7), retenido, 'retencion',
+      recepcion ? 'Devolución de retenciones (recepción provisoria)' : 'Devolución de retenciones al término', recepcion ? 'comprometido' : 'estimado')
 
   // --- Egresos registrados: proveedores, subcontratos y GG al plazo de pago ---
   for (const k of d.costos) {

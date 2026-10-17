@@ -9,10 +9,11 @@ import { diaSemana, finDeMes } from './fechas'
 import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
 import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
+import { estadoObraPorRecepcion } from './contrato'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
-  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Generador, Obra, OrdenCambio, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
+  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Garantia, Generador, Obligacion, Obra, OrdenCambio, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
 } from './types'
 
 function rng(seed: number) {
@@ -181,6 +182,43 @@ const OBRA_CLINICA: SpecObra = {
  */
 const RITMO_BASE = 1.1
 
+/** Obra terminada y en recepción provisoria: muestra el cierre del contrato (recepción, garantías). */
+const OBRA_BODEGAS: SpecObra = {
+  semilla: 13,
+  condiciones: { anticipo: 0, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25 },
+  inicioHaceDias: 175,
+  prefijoCC: 'BP',
+  obra: {
+    id: 'obra_bodegas', nombre: 'Bodegas Puerto Coquimbo', mandante: 'Logística Puerto Coquimbo S.A.',
+    lineaNegocio: 'Industrial', administrador: 'Marcela Rojas', jefeTerreno: 'Diego Vega',
+    oficinaTecnica: 'Andrés Muñoz', moneda: 'CLP', plazoDias: 120, multaDiaria: 300_000,
+    margenOfertado: 0.12, ggPresupuesto: 14_000_000, estado: 'recepcion_provisoria',
+  },
+  cuadrillas: [{ id: 'cq_vega', nombre: 'Cuadrilla Vega', capataz: 'Héctor Vega', trabajadores: 10, costoHH: 9200 }],
+  partidas: [
+    { codigo: '1.1', capitulo: '1 Obras preliminares', descripcion: 'Instalación de faena', unidad: 'gl', cantidad: 1, puVenta: 12_000_000, recursos: [OTRO('Instalación de faena', 'gl', 9_500_000)], proveedor: 'Contenedores del Norte' },
+    { codigo: '2.1', capitulo: '2 Movimiento de tierra', descripcion: 'Excavación y rellenos', unidad: 'm³', cantidad: 1800, puVenta: 3100, recursos: [MO(0.06, 9000), EQ('Excavadora', 0.04, 45_000)], proveedor: 'Maquinarias Elqui' },
+    { codigo: '3.1', capitulo: '3 Obra gruesa', descripcion: 'Radier H-25 e = 15 cm', unidad: 'm²', cantidad: 3200, puVenta: 21_000, recursos: [MO(0.25), MAT('Hormigón H-25', 0.155, 'm³', 92_000)], proveedor: 'Hormigones Sur Ltda.' },
+    { codigo: '4.1', capitulo: '4 Estructura', descripcion: 'Estructura metálica', unidad: 'kg', cantidad: 95_000, puVenta: 2900, recursos: [SUB('Subcontrato estructura metálica', 'kg', 2350)], proveedor: 'Maestranza Elqui' },
+    { codigo: '5.1', capitulo: '5 Cubierta', descripcion: 'Cubierta y revestimientos', unidad: 'm²', cantidad: 3600, puVenta: 18_500, recursos: [SUB('Subcontrato cubierta', 'm²', 15_000)], proveedor: 'Cubiertas del Pacífico' },
+    { codigo: '6.1', capitulo: '6 Instalaciones', descripcion: 'Instalaciones eléctricas', unidad: 'gl', cantidad: 1, puVenta: 48_000_000, recursos: [SUB('Subcontrato eléctrico', 'gl', 39_000_000)], proveedor: 'Eléctrica Norte Ltda.' },
+  ],
+  actividades: [
+    { codigo: 'C01', nombre: 'Instalación de faena', duracion: 7, partidas: [['1.1', 1]], cuadrilla: 'cq_vega' },
+    { codigo: 'C02', nombre: 'Movimiento de tierra', duracion: 15, pred: ['C01'], partidas: [['2.1', 1800]], cuadrilla: 'cq_vega' },
+    { codigo: 'C03', nombre: 'Radier', duracion: 25, pred: ['C02'], partidas: [['3.1', 3200]], cuadrilla: 'cq_vega' },
+    { codigo: 'C04', nombre: 'Estructura metálica', duracion: 30, pred: ['C03FC-10'], partidas: [['4.1', 95_000]], cuadrilla: 'cq_vega' },
+    { codigo: 'C05', nombre: 'Cubierta y revestimientos', duracion: 30, pred: ['C04FC-10'], partidas: [['5.1', 3600]], cuadrilla: 'cq_vega' },
+    { codigo: 'C06', nombre: 'Instalaciones eléctricas', duracion: 45, pred: ['C03'], partidas: [['6.1', 1]], cuadrilla: 'cq_vega' },
+    { codigo: 'HC', nombre: 'Término de obras', duracion: 0, pred: ['C05', 'C06'], hito: true, contractual: true },
+  ],
+  compromisos: [
+    { documento: 'SC-201', partida: '4.1', tipo: 'SUB', proveedor: 'Maestranza Elqui', factor: 2350 },
+    { documento: 'SC-202', partida: '5.1', tipo: 'SUB', proveedor: 'Cubiertas del Pacífico', factor: 15_000 },
+    { documento: 'SC-203', partida: '6.1', tipo: 'SUB', proveedor: 'Eléctrica Norte Ltda.', factor: 39_000_000 },
+  ],
+}
+
 function parsePred(s: string, ids: Map<string, string>) {
   const m = s.match(/^([A-Z0-9]+?)(FC|CC|FF|CF)?([+-]\d+)?$/)!
   return { actividadId: ids.get(m[1])!, tipo: (m[2] ?? 'FC') as 'FC', desfase: Number(m[3] ?? 0) }
@@ -287,6 +325,10 @@ function simular(spec: SpecObra, hoyDia: Dia) {
     }
   }
 
+  // Término real de la obra (si terminó): después ya no hay gastos generales de faena
+  const terminada = lbActs.every((a) => finReal.has(a.id))
+  const finObra = terminada ? Math.max(...finReal.values()) : hoyDia
+
   // --- Compromisos ---
   const compromisos: Compromiso[] = spec.compromisos.map((k) => {
     const p = partidas.find((x) => x.codigo === k.partida)!
@@ -353,7 +395,8 @@ function simular(spec: SpecObra, hoyDia: Dia) {
         })
         subAcum.set(ppid, 0)
       }
-    // Gastos generales semanales y varios sin centro de costo cada 4 semanas
+    // Gastos generales semanales y varios sin centro de costo cada 4 semanas, mientras dure la obra
+    if (v > finObra + 7) continue
     costos.push({
       id: `co_${obra.id}_GG_${semana}`, obraId: obra.id, fecha: v, partidaId: null, tipo: 'GG',
       monto: Math.round((obra.ggPresupuesto / obra.plazoDias) * 7 * randSem(1.02, 1.07)),
@@ -431,6 +474,50 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   }
 }
 
+/** Garantías y obligaciones de las tres obras, y recepción provisoria (con observaciones) de las bodegas. */
+function contratoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'obligaciones' | 'garantias' | 'recepciones'> {
+  const obra = (id: string) => d.obras.find((o) => o.id === id)!
+  const venta = (id: string) => d.partidas.filter((p) => p.obraId === id).reduce((s, p) => s + p.cantidad * p.puVenta, 0)
+  const fin = (id: string) => Math.max(...(d.programas.find((p) => p.obraId === id && p.tipo === 'actualizado')?.actividades ?? []).map((a) => a.finReal ?? 0))
+  const aromos = obra('obra_aromos')
+  const clinica = obra('obra_clinica')
+  const bodegas = obra('obra_bodegas')
+  const recepcion = fin('obra_bodegas') + 12
+  const ob = (id: string, obraId: string, tipo: Obligacion['tipo'], titulo: string, responsable: string, fechaLimite: Dia, cumplida?: Dia, multa?: Obligacion['multa']): Obligacion =>
+    ({ id: `ob_${obraId}_${id}`, obraId, tipo, titulo, responsable, fechaLimite, cumplida, multa, creada: Math.min(fechaLimite - 30, hoyDia - 1) })
+  const ga = (id: string, obraId: string, objeto: Garantia['objeto'], emisor: string, monto: number, emision: Dia, vencimiento: Dia, extra: Partial<Garantia> = {}): Garantia =>
+    ({ id: `ga_${obraId}_${id}`, obraId, tipo: 'boleta', objeto, numero: `${470_000 + id.length * 1000 + emision % 997}`, emisor, monto: Math.round(monto), emision, vencimiento, creada: emision, ...extra })
+  return {
+    obligaciones: [
+      ob('1', 'obra_aromos', 'garantia', 'Entregar boletas de fiel cumplimiento y anticipo', aromos.administrador, aromos.fechaInicio + 5, aromos.fechaInicio + 2),
+      ob('2', 'obra_aromos', 'programa', 'Programa de trabajo actualizado con la OC N° 1', aromos.oficinaTecnica, aromos.fechaInicio + 66, aromos.fechaInicio + 68),
+      ob('3', 'obra_aromos', 'informe', 'Informe mensual de avance al mandante', aromos.oficinaTecnica, finDeMes(hoyDia) + 5, undefined, { tipo: 'diaria', monto: 150_000 }),
+      ob('4', 'obra_aromos', 'poliza', 'Renovar póliza de responsabilidad civil', aromos.administrador, hoyDia + 25),
+      ob('1', 'obra_clinica', 'informe', 'Fichas técnicas de los equipos de climatización', clinica.oficinaTecnica, clinica.fechaInicio + 25, clinica.fechaInicio + 24),
+      ob('2', 'obra_clinica', 'otra', 'Plan de mitigación de ruidos en horario clínico', clinica.administrador, hoyDia + 18),
+      ob('1', 'obra_bodegas', 'otra', 'Manual de uso y mantención de las bodegas', bodegas.oficinaTecnica, recepcion, recepcion - 3),
+      ob('2', 'obra_bodegas', 'planos', 'Entregar planos as-built', bodegas.oficinaTecnica, Math.max(recepcion + 75, hoyDia + 16)),
+    ],
+    garantias: [
+      ga('fc', 'obra_aromos', 'fiel_cumplimiento', 'Banco de Chile', venta('obra_aromos') * 0.1, aromos.fechaInicio - 5, aromos.fechaInicio + aromos.plazoDias + 90),
+      ga('an', 'obra_aromos', 'anticipo', 'Banco de Chile', venta('obra_aromos') * 0.1, aromos.fechaInicio - 5, aromos.fechaInicio + 200),
+      ga('fc', 'obra_clinica', 'fiel_cumplimiento', 'Banco Estado', venta('obra_clinica') * 0.05, clinica.fechaInicio - 3, clinica.fechaInicio + clinica.plazoDias + 60),
+      ga('an', 'obra_clinica', 'anticipo', 'Banco Estado', venta('obra_clinica') * 0.15, clinica.fechaInicio - 3, clinica.fechaInicio + 120),
+      // En la recepción, la de fiel cumplimiento se canjea por una de correcta ejecución
+      ga('fc', 'obra_bodegas', 'fiel_cumplimiento', 'Banco Santander', venta('obra_bodegas') * 0.1, bodegas.fechaInicio - 5, bodegas.fechaInicio + bodegas.plazoDias + 90, { devuelta: recepcion + 20 }),
+      ga('ce', 'obra_bodegas', 'correcta_ejecucion', 'Banco Santander', venta('obra_bodegas') * 0.03, recepcion + 5, recepcion + 365),
+    ],
+    recepciones: [{
+      id: 'rc_obra_bodegas_1', obraId: 'obra_bodegas', tipo: 'provisoria', fecha: recepcion, acta: 'Acta N° 1', resultado: 'recibida', registradaPor: bodegas.administrador,
+      observaciones: [
+        { id: 'o1', texto: 'Sellar juntas de dilatación del radier en el acceso norte', plazo: recepcion + 20, subsanada: recepcion + 12, vistoBueno: recepcion + 15 },
+        { id: 'o2', texto: 'Reponer 6 planchas de revestimiento abolladas en la fachada oriente', plazo: recepcion + 30, subsanada: recepcion + 25, vistoBueno: recepcion + 28 },
+        { id: 'o3', texto: 'Certificado TE1 de la instalación eléctrica', plazo: Math.max(recepcion + 70, hoyDia + 12) },
+      ],
+    }],
+  }
+}
+
 /** Órdenes de cambio de la demo: una aprobada, una esperando al mandante y una recién valorizada. */
 function ordenesDemo(d: Datos, hoyDia: Dia): OrdenCambio[] {
   const obra = (id: string) => d.obras.find((o) => o.id === id)!
@@ -489,7 +576,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 4
+export const VERSION_DEMO = 5
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -508,9 +595,9 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [],
   }
-  for (const spec of [OBRA_AROMOS, OBRA_CLINICA]) {
+  for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
     d.obras.push(s.obra)
     d.partidas.push(...s.partidas)
@@ -534,6 +621,12 @@ function generar(hoyDia: Dia): Datos {
       d.obras = d.obras.map((o) => (o.id === obra.id ? efecto.obra : o))
     }
   }
+  // Contrato: obligaciones, garantías y la recepción provisoria de la obra terminada
+  const contrato = contratoDemo(d, hoyDia)
+  d.obligaciones.push(...contrato.obligaciones)
+  d.garantias.push(...contrato.garantias)
+  d.recepciones.push(...contrato.recepciones)
+  d.obras = d.obras.map((o) => ({ ...o, estado: estadoObraPorRecepcion(d.recepciones, o.id, hoyDia - 1, o.estado) }))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

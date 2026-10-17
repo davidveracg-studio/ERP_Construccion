@@ -2,6 +2,7 @@ import { del, get, set } from 'idb-keyval'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import { condicionesDe } from '../domain/caja'
+import { AVANCE_MINIMO_RECEPCION, estadoObraPorRecepcion, estadoRecepcion, recepcionProvisoria } from '../domain/contrato'
 import { accionesEP, aplicarAccion, editable, lineasEP, recalcularEP, type AccionEP } from '../domain/estadosPago'
 import {
   accionesOC, aplicarAccionOC, aplicarAprobacion, editableOC, partidasNuevas, requiereGerencia, type AccionOC,
@@ -16,7 +17,7 @@ import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Modelo4D, Obra, OrdenCambio, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
 } from '../domain/types'
 
 export interface UI {
@@ -75,6 +76,17 @@ export interface Acciones {
   editarOrdenCambio: (id: string, cambios: Partial<Pick<OrdenCambio, 'tipo' | 'titulo' | 'causa' | 'descripcion' | 'lineas' | 'diasPlazo'>>) => void
   /** Aplica una acción del ciclo y sus efectos sobre partidas y plazo; devuelve el motivo si no se pudo. */
   accionOrdenCambio: (id: string, accion: AccionOC, datos?: { texto?: string }) => string | null
+  crearObligacion: (o: Omit<Obligacion, 'id' | 'creada'>) => void
+  cumplirObligacion: (id: string, fecha: Dia, evidencia?: string) => void
+  eliminarObligacion: (id: string) => void
+  registrarGarantia: (g: Omit<Garantia, 'id' | 'creada'>) => void
+  /** Registra la garantía que renueva a otra (la anterior queda "renovada"). */
+  renovarGarantia: (id: string, nueva: Pick<Garantia, 'numero' | 'emisor' | 'monto' | 'emision' | 'vencimiento'>) => void
+  cerrarGarantia: (id: string, como: 'devuelta' | 'cobrada', fecha: Dia) => void
+  /** Registra una recepción y actualiza el estado de la obra; devuelve el motivo si no se pudo. */
+  registrarRecepcion: (r: Omit<RecepcionObra, 'id' | 'registradaPor'>) => string | null
+  /** Subsanación (R02) o V°B° del mandante (R11) a una observación de la recepción. */
+  observacionRecepcion: (recepcionId: string, observacionId: string, accion: 'subsanar' | 'visto_bueno') => void
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -338,6 +350,44 @@ export const useStore = create<Estado>()(
             return e instanceof Error ? e.message : String(e)
           }
         },
+        crearObligacion: (o) => mutar((s) => ({ obligaciones: [...s.obligaciones, { ...o, id: uid('ob'), creada: hoy() }] })),
+        cumplirObligacion: (id, fecha, evidencia) =>
+          mutar((s) => ({ obligaciones: s.obligaciones.map((o) => (o.id === id ? { ...o, cumplida: fecha, evidencia } : o)) })),
+        eliminarObligacion: (id) => mutar((s) => ({ obligaciones: s.obligaciones.filter((o) => o.id !== id) })),
+        registrarGarantia: (g) => mutar((s) => ({ garantias: [...s.garantias, { ...g, id: uid('ga'), creada: hoy() }] })),
+        renovarGarantia: (id, nueva) =>
+          mutar((s) => {
+            const g = s.garantias.find((x) => x.id === id)
+            if (!g) return {}
+            return { garantias: [...s.garantias, { ...g, ...nueva, id: uid('ga'), reemplazaA: id, devuelta: undefined, cobrada: undefined, creada: hoy() }] }
+          }),
+        cerrarGarantia: (id, como, fecha) =>
+          mutar((s) => ({ garantias: s.garantias.map((g) => (g.id === id ? { ...g, [como]: fecha } : g)) })),
+        registrarRecepcion: (r) => {
+          const s = getS()
+          const t = hoy()
+          if (r.tipo === 'provisoria' && r.resultado === 'recibida' && calcularObra(s, r.obraId, t).avanceReal < AVANCE_MINIMO_RECEPCION)
+            return 'La obra aún no está terminada: la recepción provisoria requiere el 100 % de avance.'
+          if (r.tipo === 'definitiva') {
+            const prov = recepcionProvisoria(s.recepciones, r.obraId, t)
+            if (!prov) return 'Primero debe registrarse la recepción provisoria.'
+            if (estadoRecepcion(prov, t) !== 'provisoria_sin_observaciones') return 'Quedan observaciones de la recepción provisoria sin cerrar.'
+          }
+          mutar((x) => {
+            const recepciones = [...x.recepciones, { ...r, id: uid('rc'), registradaPor: x.ui.usuario }]
+            return { recepciones, obras: x.obras.map((o) => (o.id === r.obraId ? { ...o, estado: estadoObraPorRecepcion(recepciones, o.id, Infinity, o.estado) } : o)) }
+          })
+          return null
+        },
+        observacionRecepcion: (recepcionId, observacionId, accion) =>
+          mutar((s) => {
+            const t = hoy()
+            const recepciones = s.recepciones.map((r) => (r.id !== recepcionId ? r : {
+              ...r, observaciones: r.observaciones.map((o) => (o.id !== observacionId ? o : accion === 'subsanar' ? { ...o, subsanada: t } : { ...o, vistoBueno: t, subsanada: o.subsanada ?? t })),
+            }))
+            const r = recepciones.find((x) => x.id === recepcionId)!
+            return { recepciones, obras: s.obras.map((o) => (o.id === r.obraId ? { ...o, estado: estadoObraPorRecepcion(recepciones, o.id, Infinity, o.estado) } : o)) }
+          }),
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -345,7 +395,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 7,
+      version: 8,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
