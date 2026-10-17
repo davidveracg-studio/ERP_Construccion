@@ -4,14 +4,14 @@
 import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
 import { CONFIG_DEFECTO, type Datos } from './datos'
-import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from './caja'
+import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from './estadosPago'
 import { diaSemana, finDeMes } from './fechas'
 import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
 import { hhPorUnidad } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
-  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Obra, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
+  Actividad, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, EstadoPago, Generador, Obra, Partida, Programa, RDO, Recurso, ReglaMapeo, TipoRecurso,
 } from './types'
 
 function rng(seed: number) {
@@ -76,7 +76,7 @@ const CUENTA: Record<TipoRecurso | 'GG', string> = { MO: '5-1-00', MAT: '5-1-01'
 
 const OBRA_AROMOS: SpecObra = {
   semilla: 42,
-  condiciones: { anticipo: 0.1, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25 },
+  condiciones: { anticipo: 0.1, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25, reajuste: { indice: 'IPC', base: 100 } },
   ritmo: 1.08,
   inicioHaceDias: 112,
   prefijoCC: 'LA',
@@ -374,35 +374,51 @@ function simular(spec: SpecObra, hoyDia: Dia) {
     creadoPor: obra.oficinaTecnica, fecha: inicio, actividades,
     motivo: tipo === 'lineaBase' ? 'Línea base inicial (programa contractual)' : undefined,
   })
-  // --- Estados de pago al mandante: anticipo al inicio y un EP por mes ---
+  // --- Estados de pago al mandante: anticipo al inicio y un EP por mes (ciclo de 10 §9) ---
   const cond = spec.condiciones
   const ayer = hoyDia - 1
   const estadosPago: EstadoPago[] = []
   const hasta = (f: Dia | undefined) => (f != null && f <= ayer ? f : undefined)
+  const venta = partidas.reduce((s, p) => s + p.cantidad * p.puVenta, 0)
   if (cond.anticipo > 0) {
-    const bruto = Math.round(partidas.reduce((s, p) => s + p.cantidad * p.puVenta, 0) * cond.anticipo)
+    const bruto = Math.round(venta * cond.anticipo)
     estadosPago.push({
-      id: `ep_${obra.id}_0`, obraId: obra.id, numero: 0, tipo: 'anticipo', fechaCorte: inicio, lineas: [],
-      bruto, retencion: 0, amortizacion: 0, neto: bruto, presentado: inicio + 2,
+      id: `ep_${obra.id}_0`, obraId: obra.id, numero: 0, tipo: 'anticipo', fechaCorte: inicio, version: 1, lineas: [],
+      bruto, reajuste: 0, descuentos: [], retencion: 0, amortizacion: 0, neto: bruto,
+      creado: inicio + 1, enRevision: inicio + 1, presentaciones: [inicio + 2], observaciones: [],
       aprobado: hasta(inicio + 7), facturado: hasta(inicio + 8), factura: hasta(inicio + 8) != null ? `F-${spec.prefijoCC}-1000` : undefined,
-      vencimiento: hasta(inicio + 8) != null ? inicio + 8 + cond.diasPago : undefined, pagado: hasta(inicio + 15),
+      vencimiento: hasta(inicio + 8) != null ? inicio + 8 + cond.diasPago : undefined,
+      pagos: hasta(inicio + 15) != null ? [{ fecha: inicio + 15, monto: bruto }] : [], pagado: hasta(inicio + 15),
     })
   }
-  for (let corte = finDeMes(inicio), n = 1; corte + DIAS_PREPARACION_EP <= ayer; corte = finDeMes(corte + 1)) {
-    const lineas = lineasEP({ rdos, estadosPago, partidas }, obra.id, corte)
+  const unidades = new Map(partidas.map((p) => [p.id, p]))
+  for (let corte = finDeMes(inicio), n = 1; corte + 1 <= ayer; corte = finDeMes(corte + 1)) {
+    const lineas = lineasEP({ rdos, estadosPago, partidas }, obra.id, corte).map((l) => ({ ...l, generadores: generadoresDemo(unidades.get(l.partidaId)!, l.cantidad, n) }))
     const bruto = lineas.reduce((s, l) => s + l.monto, 0)
     if (bruto <= 0) continue
     const re = rng(spec.semilla * 31 + n)
     const presentado = corte + DIAS_PREPARACION_EP
-    const aprobado = presentado + cond.diasAprobacion + Math.round(re() * 4 - 2)
+    // Un EP de cada obra recibe una observación del ITO y se reingresa como versión 2
+    const observado = n === 2 ? presentado + 4 : undefined
+    const reingreso = observado != null ? observado + 2 : undefined
+    const aprobado = (reingreso ?? presentado) + cond.diasAprobacion + Math.round(re() * 4 - 2) - (reingreso != null ? 6 : 0)
     const facturado = aprobado + 1
-    // Mandante cumplidor: paga entre 0 y 4 días antes del vencimiento
     const vencimiento = facturado + cond.diasPago
+    // Mandante cumplidor: paga entre 0 y 4 días antes del vencimiento
+    const pago = vencimiento - Math.round(re() * 4)
+    const indiceReajuste = cond.reajuste ? Math.round(cond.reajuste.base * 1.003 ** n * 100) / 100 : undefined
+    const montos = montosEP(bruto, cond, anticipoPorAmortizar(estadosPago, corte), { indiceReajuste })
+    const presentaciones = [hasta(presentado), hasta(reingreso)].filter((f): f is Dia => f != null)
+    const obs = hasta(observado) != null
+      ? [{ fecha: observado!, autor: `ITO ${spec.obra.mandante}`, texto: 'Falta el respaldo de generadores del hormigón y la cubicación del moldaje no cuadra con el plano de losas. Corregir y reingresar.', version: 1, origen: 'mandante' as const }]
+      : []
     estadosPago.push({
-      id: `ep_${obra.id}_${n}`, obraId: obra.id, numero: n, tipo: 'avance', fechaCorte: corte, lineas, bruto,
-      ...montosEP(bruto, cond, anticipoPorAmortizar(estadosPago, corte)),
-      presentado, aprobado: hasta(aprobado), facturado: hasta(facturado), factura: hasta(facturado) != null ? `F-${spec.prefijoCC}-${1000 + n}` : undefined,
-      vencimiento: hasta(facturado) != null ? vencimiento : undefined, pagado: hasta(vencimiento - Math.round(re() * 4)),
+      id: `ep_${obra.id}_${n}`, obraId: obra.id, numero: n, tipo: 'avance', fechaCorte: corte, version: presentaciones.length > 1 ? 2 : 1,
+      lineas, bruto, indiceReajuste, descuentos: [], ...montos,
+      creado: corte + 1, enRevision: hasta(corte + 2), presentaciones, observaciones: obs,
+      aprobado: hasta(aprobado), facturado: hasta(facturado), factura: hasta(facturado) != null ? `F-${spec.prefijoCC}-${1000 + n}` : undefined,
+      vencimiento: hasta(facturado) != null ? vencimiento : undefined,
+      pagos: hasta(pago) != null ? [{ fecha: pago, monto: montos.neto }] : [], pagado: hasta(pago),
     })
     n++
   }
@@ -414,11 +430,24 @@ function simular(spec: SpecObra, hoyDia: Dia) {
   }
 }
 
+/** Respaldo de cantidades de ejemplo: la cantidad del período repartida por sector, con fórmula en m² y m³. */
+function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
+  const sectores = p.unidad === 'gl' ? [['Según avance validado en RDO', 1]] as const
+    : [['Sector norte (ejes 1–3)', 0.45], ['Sector central (ejes 3–5)', 0.35], ['Sector sur (ejes 5–7)', 0.2]] as const
+  const r2 = (x: number) => Math.round(x * 100) / 100
+  return sectores.map(([ubicacion, f], i) => {
+    const q = r2(cantidad * f)
+    const lado = r2(Math.sqrt(q / (p.unidad === 'm³' ? 0.18 : 1)) * 1.2)
+    const formula = p.unidad === 'm²' && lado > 0 ? `${lado} × ${r2(q / lado)}` : p.unidad === 'm³' && lado > 0 ? `${lado} × ${r2(q / 0.18 / lado)} × 0,18` : undefined
+    return { id: `gen_${p.id}_${n}_${i}`, ubicacion, descripcion: p.descripcion, formula, cantidad: q }
+  })
+}
+
 /**
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 2
+export const VERSION_DEMO = 3
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {

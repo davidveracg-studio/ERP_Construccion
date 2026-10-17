@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { anticipoPorAmortizar, CONDICIONES_PAGO_DEFECTO, epVencido, etapaEP, lineasEP, montosEP } from './caja'
+import { CONDICIONES_PAGO_DEFECTO } from './caja'
+import { anticipoPorAmortizar, lineasEP, montosEP } from './estadosPago'
 import { calcularObra } from './evm'
 import { dia } from './fechas'
 import { evaluarReglas } from './reglas'
@@ -8,27 +9,18 @@ import type { EstadoPago } from './types'
 
 const HOY = dia('2026-10-20')
 const ep = (o: Partial<EstadoPago>): EstadoPago => ({
-  id: 'e', obraId: 'o', numero: 1, tipo: 'avance', fechaCorte: 0, lineas: [], bruto: 100, retencion: 5, amortizacion: 10, neto: 85, presentado: 10, ...o,
+  id: 'e', obraId: 'o', numero: 1, tipo: 'avance', fechaCorte: 0, version: 1, lineas: [], bruto: 100, reajuste: 0, descuentos: [],
+  retencion: 5, amortizacion: 10, neto: 85, creado: 0, presentaciones: [10], observaciones: [], pagos: [], ...o,
 })
 
 describe('Caja: estados de pago', () => {
-  it('la etapa depende de la fecha consultada', () => {
-    const e = ep({ presentado: 10, aprobado: 20, facturado: 21, vencimiento: 51, pagado: 50 })
-    expect(etapaEP(e, 5)).toBeNull()
-    expect(etapaEP(e, 15)).toBe('presentado')
-    expect(etapaEP(e, 20)).toBe('aprobado')
-    expect(etapaEP(e, 30)).toBe('facturado')
-    expect(etapaEP(e, 50)).toBe('pagado')
-    expect(epVencido(ep({ facturado: 21, vencimiento: 51 }), 60)).toBe(true)
-    expect(epVencido(e, 60)).toBe(false)
-  })
-
   it('descuenta retención y amortiza el anticipo hasta agotarlo', () => {
     const cond = { ...CONDICIONES_PAGO_DEFECTO, anticipo: 0.1, retencion: 0.05 }
-    expect(montosEP(1000, cond, 500)).toEqual({ retencion: 50, amortizacion: 100, neto: 850 })
-    expect(montosEP(1000, cond, 30)).toEqual({ retencion: 50, amortizacion: 30, neto: 920 })
-    const eps = [ep({ tipo: 'anticipo', bruto: 300, amortizacion: 0 }), ep({ amortizacion: 100 })]
+    expect(montosEP(1000, cond, 500)).toEqual({ reajuste: 0, retencion: 50, amortizacion: 100, neto: 850 })
+    expect(montosEP(1000, cond, 30)).toEqual({ reajuste: 0, retencion: 50, amortizacion: 30, neto: 920 })
+    const eps = [ep({ id: 'a', tipo: 'anticipo', bruto: 300, amortizacion: 0 }), ep({ id: 'b', amortizacion: 100 })]
     expect(anticipoPorAmortizar(eps, 20)).toBe(200)
+    expect(anticipoPorAmortizar(eps, 20, 'b')).toBe(300)
   })
 
   it('el próximo EP incluye solo lo validado que no se ha cobrado', () => {
@@ -51,7 +43,10 @@ describe('Caja: proyección', () => {
       const d = generarDemo(HOY)
       const c = calcularObra(d, obra, HOY)
       const total = c.caja.movimientos.reduce((s, m) => s + m.monto, 0)
-      expect(Math.abs(total - (c.venta - c.eac)) / c.venta).toBeLessThan(0.005)
+      // Más el reajuste cobrado y menos descuentos y multas
+      const eps = d.estadosPago.filter((e) => e.obraId === obra)
+      const ajustes = eps.reduce((s, e) => s + e.reajuste - e.descuentos.reduce((x, y) => x + y.monto, 0), 0)
+      expect(Math.abs(total - (c.venta - c.eac + ajustes)) / c.venta).toBeLessThan(0.005)
       // Hasta hoy, todo es real; después, comprometido o estimado
       for (const m of c.caja.movimientos) expect(m.origen === 'real').toBe(m.fecha <= HOY)
     })
@@ -67,7 +62,7 @@ describe('Caja: proyección', () => {
   it('alerta RULE-603 cuando la caja proyectada no alcanza y RULE-402 con EP vencidos', () => {
     const d = generarDemo(HOY)
     // Mandante que no paga: todos los EP quedan facturados y vencidos, sin capital de trabajo
-    d.estadosPago = d.estadosPago.map((e) => (e.pagado != null ? { ...e, pagado: undefined } : e))
+    d.estadosPago = d.estadosPago.map((e) => ({ ...e, pagos: [], pagado: undefined }))
     d.obras = d.obras.map((o) => ({ ...o, condicionesPago: { ...o.condicionesPago!, capitalTrabajo: 0 } }))
     const c = calcularObra(d, 'obra_aromos', HOY)
     expect(c.caja.estado).toBe('rojo')

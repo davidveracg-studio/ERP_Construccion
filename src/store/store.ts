@@ -1,7 +1,8 @@
 import { del, get, set } from 'idb-keyval'
 import { create } from 'zustand'
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
-import { anticipoPorAmortizar, condicionesDe, lineasEP, montosEP } from '../domain/caja'
+import { condicionesDe } from '../domain/caja'
+import { accionesEP, aplicarAccion, editable, lineasEP, recalcularEP, type AccionEP } from '../domain/estadosPago'
 import { calcularCPM } from '../domain/cpm'
 import { COLECCIONES, datosVacios, programaDe, type Datos } from '../domain/datos'
 import { calcularObra } from '../domain/evm'
@@ -27,6 +28,7 @@ export const USUARIOS: Record<Rol, string> = {
   R03: 'Juan Soto',
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
+  R11: 'ITO del mandante',
 }
 
 export interface Acciones {
@@ -58,10 +60,12 @@ export interface Acciones {
   cargarPrograma: (obraId: string, actividades: Actividad[]) => void
   /** Guarda el modelo 4D de la obra; undefined vuelve al modelo inferido del programa. */
   guardarModelo4D: (obraId: string, modelo: Modelo4D | undefined) => void
-  /** Genera y presenta el EP con el avance validado no cobrado hasta el corte (null si no hay avance). */
-  generarEstadoPago: (obraId: string, fechaCorte: Dia) => EstadoPago | null
-  /** Registra la aprobación, la factura (con su vencimiento) o el pago de un EP. */
-  avanzarEstadoPago: (id: string, etapa: 'aprobado' | 'facturado' | 'pagado', fecha: Dia, factura?: string) => void
+  /** Genera un EP en borrador con el avance validado no cobrado hasta el corte (null si no hay avance). */
+  generarEstadoPago: (obraId: string, fechaCorte: Dia, indiceReajuste?: number) => EstadoPago | null
+  /** Edita la cubicación, el índice de reajuste o los descuentos de un EP en borrador u observado. */
+  editarEstadoPago: (id: string, cambios: Partial<Pick<EstadoPago, 'lineas' | 'descuentos' | 'indiceReajuste'>>) => void
+  /** Aplica una acción del ciclo del EP; devuelve el motivo si no se pudo. */
+  accionEstadoPago: (id: string, accion: AccionEP, datos?: { texto?: string; factura?: string; monto?: number; fecha?: Dia }) => string | null
   guardarCondicionesPago: (obraId: string, c: CondicionesPago) => void
 }
 
@@ -240,31 +244,43 @@ export const useStore = create<Estado>()(
         guardarModelo4D: (obraId, modelo) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, modelo4d: modelo } : o)) })),
 
-        generarEstadoPago: (obraId, fechaCorte) => {
+        generarEstadoPago: (obraId, fechaCorte, indiceReajuste) => {
           const s = getS()
           const obra = s.obras.find((o) => o.id === obraId)
           const lineas = lineasEP(s, obraId, fechaCorte)
-          const bruto = lineas.reduce((t, l) => t + l.monto, 0)
-          if (!obra || bruto <= 0) return null
+          if (!obra || lineas.length === 0) return null
           const propios = s.estadosPago.filter((e) => e.obraId === obraId)
-          const ep: EstadoPago = {
-            id: uid('ep'), obraId, numero: Math.max(0, ...propios.map((e) => e.numero)) + 1, tipo: 'avance', fechaCorte, lineas, bruto,
-            ...montosEP(bruto, condicionesDe(obra), anticipoPorAmortizar(propios, fechaCorte)),
-            presentado: Math.max(fechaCorte, hoy()),
+          const base: EstadoPago = {
+            id: uid('ep'), obraId, numero: Math.max(0, ...propios.map((e) => e.numero)) + 1, tipo: 'avance', fechaCorte, version: 1,
+            lineas, bruto: 0, indiceReajuste, reajuste: 0, descuentos: [], retencion: 0, amortizacion: 0, neto: 0,
+            creado: Math.max(fechaCorte, hoy()), presentaciones: [], observaciones: [], pagos: [],
           }
+          const ep = recalcularEP(base, condicionesDe(obra), propios)
           mutar((x) => ({ estadosPago: [...x.estadosPago, ep] }))
           return ep
         },
-        avanzarEstadoPago: (id, etapa, fecha, factura) =>
+        editarEstadoPago: (id, cambios) =>
           mutar((s) => ({
             estadosPago: s.estadosPago.map((e) => {
-              if (e.id !== id) return e
-              if (etapa === 'aprobado') return { ...e, aprobado: fecha }
-              if (etapa === 'pagado') return { ...e, pagado: fecha }
+              if (e.id !== id || !editable(e, hoy())) return e
               const obra = s.obras.find((o) => o.id === e.obraId)
-              return { ...e, facturado: fecha, factura, vencimiento: fecha + condicionesDe(obra ?? {}).diasPago }
+              return recalcularEP({ ...e, ...cambios }, condicionesDe(obra ?? {}), s.estadosPago.filter((x) => x.obraId === e.obraId))
             }),
           })),
+        accionEstadoPago: (id, accion, datos = {}) => {
+          const s = getS()
+          const ep = s.estadosPago.find((e) => e.id === id)
+          if (!ep) return 'El estado de pago no existe.'
+          if (!accionesEP(ep, hoy(), s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en esta etapa.'
+          try {
+            const obra = s.obras.find((o) => o.id === ep.obraId)
+            const nuevo = aplicarAccion(ep, accion, { fecha: datos.fecha ?? hoy(), autor: s.ui.usuario, ...datos }, condicionesDe(obra ?? {}))
+            mutar((x) => ({ estadosPago: x.estadosPago.map((e) => (e.id === id ? nuevo : e)) }))
+            return null
+          } catch (e) {
+            return e instanceof Error ? e.message : String(e)
+          }
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -272,7 +288,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 5,
+      version: 6,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

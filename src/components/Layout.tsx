@@ -34,8 +34,10 @@ const NAV: Item[] = [
   { to: '/alertas', etiqueta: 'Alertas y acciones', roles: ['R01', 'R02', 'R03', 'R05'], icono: '⚑' },
   { to: '/costos', etiqueta: 'Control de costos', roles: ['R01', 'R02', 'R05'], icono: '$' },
   { to: '/caja', etiqueta: 'Flujo de caja', roles: ['R01', 'R02', 'R05'], icono: '≋' },
+  { to: '/estados-pago', etiqueta: 'Estados de pago', roles: ['R01', 'R02', 'R05'], icono: '▦' },
+  { to: '/mandante', etiqueta: 'Portal mandante', roles: ['R11', 'R02'], icono: '⌂' },
   { to: '/programa', etiqueta: 'Carta Gantt', roles: ['R01', 'R02', 'R03', 'R05'], icono: '▤' },
-  { to: '/4d', etiqueta: 'Simulación 4D', roles: ['R01', 'R02', 'R03', 'R05'], icono: '◆' },
+  { to: '/4d', etiqueta: 'Simulación 4D', roles: ['R01', 'R02', 'R03', 'R05', 'R11'], icono: '◆' },
   { to: '/terreno', etiqueta: 'Validación y rendimientos', roles: ['R02', 'R03'], icono: '✓' },
   { to: '/rdo', etiqueta: 'Reporte diario (RDO)', roles: ['R03', 'R04'], icono: '✎' },
   { to: '/cierre', etiqueta: 'Cierre semanal', roles: ['R02', 'R05'], icono: '⏹' },
@@ -56,6 +58,7 @@ export function Layout() {
   const abiertas = alertas.filter((a) => a.obraId === ui.obraId && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
   const criticas = abiertas.filter((a) => a.severidad === 'critica' || a.severidad === 'alta').length
   const salir = useSesion((s) => s.salir)
+  const externo = ui.rol === 'R11'
   const items = NAV.filter((n) => n.roles.includes(ui.rol) && (obras.length > 0 || ['/nueva-obra', '/config'].includes(n.to)))
 
   return (
@@ -96,17 +99,20 @@ export function Layout() {
               {obras.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
             </select>
           )}
-          {c && <MiniSemaforo celdas={sem} />}
+          {/* El mandante (R11) no ve el semáforo interno, las alertas ni el estado de los datos */}
+          {c && !externo && <MiniSemaforo celdas={sem} />}
           <div className="ml-auto flex items-center gap-2">
             {modoNube && <EstadoGuardado />}
-            {c && c.confianza !== 'alta' && (
+            {!externo && c && c.confianza !== 'alta' && (
               <Badge tono="ambar">Datos {c.confianza === 'media' ? 'incompletos' : 'muy incompletos'}</Badge>
             )}
-            {c && c.rdoPendientes > 0 && <Badge tono="azul">{c.rdoPendientes} RDO por validar</Badge>}
-            <NavLink to="/alertas" className="relative rounded-md p-2 text-slate-600 hover:bg-slate-100" aria-label={`${abiertas.length} alertas abiertas`}>
-              ⚑
-              {abiertas.length > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-crit px-1 text-[10px] font-bold text-white">{abiertas.length}</span>}
-            </NavLink>
+            {!externo && c && c.rdoPendientes > 0 && <Badge tono="azul">{c.rdoPendientes} RDO por validar</Badge>}
+            {!externo && (
+              <NavLink to="/alertas" className="relative rounded-md p-2 text-slate-600 hover:bg-slate-100" aria-label={`${abiertas.length} alertas abiertas`}>
+                ⚑
+                {abiertas.length > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-crit px-1 text-[10px] font-bold text-white">{abiertas.length}</span>}
+              </NavLink>
+            )}
           </div>
         </header>
         <main className="flex-1 overflow-auto p-4 lg:p-6">

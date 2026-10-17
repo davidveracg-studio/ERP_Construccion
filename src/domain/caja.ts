@@ -9,14 +9,12 @@ import { programaDe, type Datos } from './datos'
 import { calcularObraPlan, costoRegistro, type CalcObra } from './evm'
 import { finDeMes } from './fechas'
 import { puCostoTipo } from './presupuesto'
+import { anticipoPorAmortizar, DIAS_PREPARACION_EP, epVencido, etapaEP, montosEP, pagadoHasta, presentadoEn, vigente } from './estadosPago'
 import type { CondicionesPago, Dia, EstadoPago, EstadoSemaforo, Partida } from './types'
 
 export const CONDICIONES_PAGO_DEFECTO: CondicionesPago = {
   anticipo: 0, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.2,
 }
-
-/** Días entre el corte del EP y su presentación al mandante. */
-export const DIAS_PREPARACION_EP = 3
 
 /** Días entre el cobro del EP al mandante y el pago a los subcontratistas del mismo período. */
 export const DIAS_PAGO_CONTRA_PAGO = 5
@@ -40,62 +38,8 @@ export interface Movimiento {
   detalle: string
 }
 
-export type EtapaEP = 'presentado' | 'aprobado' | 'facturado' | 'pagado'
-
-export const ETAPAS_EP: Record<EtapaEP, string> = { presentado: 'Presentado', aprobado: 'Aprobado', facturado: 'Facturado', pagado: 'Pagado' }
-
-/** Etapa del EP al cierre del día t (null si aún no se presentaba). */
-export function etapaEP(ep: EstadoPago, t: Dia): EtapaEP | null {
-  if (ep.pagado != null && ep.pagado <= t) return 'pagado'
-  if (ep.facturado != null && ep.facturado <= t) return 'facturado'
-  if (ep.aprobado != null && ep.aprobado <= t) return 'aprobado'
-  return ep.presentado <= t ? 'presentado' : null
-}
-
-/** Facturado, sin pagar y con el vencimiento superado al día t (RULE-402). */
-export function epVencido(ep: EstadoPago, t: Dia): boolean {
-  return etapaEP(ep, t) === 'facturado' && ep.vencimiento != null && ep.vencimiento < t
-}
-
 export function condicionesDe(obra: { condicionesPago?: CondicionesPago }): CondicionesPago {
   return { ...CONDICIONES_PAGO_DEFECTO, ...obra.condicionesPago }
-}
-
-/** Montos de un EP de avance a partir de su valor bruto y lo que queda por amortizar del anticipo. */
-export function montosEP(bruto: number, cond: CondicionesPago, anticipoPorAmortizar: number) {
-  const retencion = Math.round(bruto * cond.retencion)
-  const amortizacion = Math.round(Math.min(bruto * cond.anticipo, Math.max(0, anticipoPorAmortizar)))
-  return { retencion, amortizacion, neto: bruto - retencion - amortizacion }
-}
-
-/** Anticipo recibido menos lo amortizado en los EP presentados hasta t. */
-export function anticipoPorAmortizar(eps: EstadoPago[], t: Dia) {
-  const vigentes = eps.filter((e) => e.presentado <= t)
-  return vigentes.filter((e) => e.tipo === 'anticipo').reduce((s, e) => s + e.bruto, 0) - vigentes.reduce((s, e) => s + e.amortizacion, 0)
-}
-
-/**
- * Líneas del próximo EP de avance al corte: lo ejecutado y validado hasta el corte que aún no
- * se ha incluido en un EP, valorizado a precio de venta.
- */
-export function lineasEP(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas'>, obraId: string, corte: Dia) {
-  const ejecutado = new Map<string, number>()
-  for (const r of d.rdos) {
-    if (r.obraId !== obraId || r.estado !== 'validado' || r.fecha > corte) continue
-    for (const a of r.avances) ejecutado.set(a.partidaId, (ejecutado.get(a.partidaId) ?? 0) + a.cantidad)
-  }
-  const incluido = new Map<string, number>()
-  for (const e of d.estadosPago)
-    if (e.obraId === obraId) for (const l of e.lineas) incluido.set(l.partidaId, (incluido.get(l.partidaId) ?? 0) + l.cantidad)
-  const partidas = new Map(d.partidas.filter((p) => p.obraId === obraId).map((p) => [p.id, p]))
-  const lineas: EstadoPago['lineas'] = []
-  for (const [pid, q] of ejecutado) {
-    const p = partidas.get(pid)
-    const cantidad = Math.min(q, p?.cantidad ?? q) - (incluido.get(pid) ?? 0)
-    if (!p || cantidad <= 1e-9) continue
-    lineas.push({ partidaId: pid, cantidad: Math.round(cantidad * 10_000) / 10_000, monto: Math.round(cantidad * p.puVenta) })
-  }
-  return lineas
 }
 
 export interface SemanaCaja {
@@ -145,25 +89,29 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
     movs.push({ fecha, monto: Math.round(monto), tipo, detalle, origen: fecha <= T ? 'real' : futuro })
   }
 
-  // --- Estados de pago presentados hasta el corte ---
-  const eps = d.estadosPago.filter((e) => e.obraId === obra.id && e.presentado <= T).sort((a, b) => a.numero - b.numero)
+  // --- Estados de pago presentados y no anulados al corte ---
+  const eps = d.estadosPago.filter((e) => e.obraId === obra.id && vigente(e, T)).sort((a, b) => a.numero - b.numero)
   let cxc = 0
   let cxcVencida = 0
   const epVencidos: EstadoPago[] = []
   for (const ep of eps) {
     const tipo: TipoMovimiento = ep.tipo === 'anticipo' ? 'anticipo' : 'cobro_ep'
     const nombre = ep.tipo === 'anticipo' ? 'Anticipo' : `EP N° ${ep.numero}`
+    for (const p of ep.pagos) if (p.fecha <= T) add(p.fecha, p.monto, tipo, nombre)
+    const saldo = ep.neto - pagadoHasta(ep, T)
+    if (saldo < 1) continue
     const etapa = etapaEP(ep, T)
-    if (etapa === 'pagado') { add(ep.pagado!, ep.neto, tipo, nombre); continue }
     let fecha: Dia
-    if (etapa === 'facturado') {
-      cxc += ep.neto
+    if (etapa === 'facturado' || etapa === 'pagado_parcial') {
+      cxc += saldo
       fecha = ep.vencimiento ?? ep.facturado! + cond.diasPago
-      if (fecha < T) { cxcVencida += ep.neto; epVencidos.push(ep) }
+      if (epVencido(ep, T)) { cxcVencida += saldo; epVencidos.push(ep) }
     } else if (etapa === 'aprobado') fecha = ep.aprobado! + 1 + cond.diasPago
-    else fecha = ep.presentado + cond.diasAprobacion + 1 + cond.diasPago
+    // Presentado u observado: se cobra tras aprobarse (un observado se demora un ciclo más)
+    else fecha = Math.max(presentadoEn(ep)!, T) + cond.diasAprobacion + 1 + cond.diasPago
     // Lo atrasado se espera cobrar la próxima semana
-    add(Math.max(fecha, T + 7), ep.neto, tipo, `${nombre} (${etapa === 'facturado' ? 'facturado' : etapa === 'aprobado' ? 'aprobado' : 'en aprobación'})`)
+    const etiqueta = etapa === 'facturado' ? 'facturado' : etapa === 'pagado_parcial' ? 'saldo' : etapa === 'aprobado' ? 'aprobado' : etapa === 'observado' ? 'observado' : 'en aprobación'
+    add(Math.max(fecha, T + 7), saldo, tipo, `${nombre} (${etiqueta})`)
   }
 
   // --- Avance futuro: curva de la línea base reescalada al término proyectado ---
@@ -269,7 +217,7 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
   const colchon = (d.config.umbrales.cajaColchon ?? 0.02) * venta
   const estado: EstadoSemaforo = T < obra.fechaInicio ? 'na' : minimo60 >= colchon ? 'verde' : minimo60 >= 0 ? 'amarillo' : 'rojo'
 
-  const aprobado = eps.filter((e) => e.tipo === 'avance' && (etapaEP(e, T) ?? 'presentado') !== 'presentado').reduce((s, e) => s + e.bruto, 0)
+  const aprobado = eps.filter((e) => e.tipo === 'avance' && e.aprobado != null && e.aprobado <= T).reduce((s, e) => s + e.bruto, 0)
   const porPagar30 = -movs.filter((m) => m.origen === 'comprometido' && m.monto < 0 && m.fecha <= T + 30).reduce((s, m) => s + m.monto, 0)
 
   return {
