@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'
 import { hoy } from './domain/fechas'
+import { demoDesactualizada } from './domain/seed'
 import { modoNube } from './lib/supabase'
 import { Cargando, IngresoDemo } from './pages/Acceso'
 import Alertas, { AlertaDetalle } from './pages/Alertas'
@@ -87,7 +88,7 @@ function AppLocal() {
   const [listo, setListo] = useState(useStore.persist.hasHydrated())
   useEffect(() => {
     // La demo se renueva cada día para mostrar datos al día (solo si los datos son de la demo)
-    const renovar = () => { const s = useStore.getState(); if (s.config.demoGenerada != null && s.config.demoGenerada !== hoy()) s.reiniciarDemo() }
+    const renovar = () => { const s = useStore.getState(); if (s.config.demoGenerada != null && demoDesactualizada(s.config, hoy())) s.reiniciarDemo() }
     if (useStore.persist.hasHydrated()) renovar()
     return useStore.persist.onFinishHydration(() => { renovar(); setListo(true) })
   }, [])

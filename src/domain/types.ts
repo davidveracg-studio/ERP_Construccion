@@ -394,6 +394,8 @@ export interface Config {
   rut: string
   /** Día en que se generaron los datos de demostración (la demo se renueva cada día). */
   demoGenerada?: Dia
+  /** Versión del generador con que se crearon (ver VERSION_DEMO). */
+  demoVersion?: number
   umbrales: {
     /** Colchón de caja por obra como fracción de su venta (KFI-06): bajo él, amarillo; bajo 0, rojo. */
     cajaColchon?: number
