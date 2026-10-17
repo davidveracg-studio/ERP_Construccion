@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { calcularObra } from './evm'
 import { dia } from './fechas'
 import { semaforo } from './semaforo'
-import { generarDemo } from './seed'
+import { demoDesactualizada, generarDemo, VERSION_DEMO } from './seed'
 
 const ABIERTAS = ['activa', 'reconocida', 'en_accion']
 
@@ -11,6 +11,14 @@ describe('Demo', () => {
     const hoy = dia('2026-10-20')
     expect(JSON.stringify(generarDemo(hoy))).toBe(JSON.stringify(generarDemo(hoy)))
     expect(generarDemo(hoy).config.demoGenerada).toBe(hoy)
+  })
+
+  it('se renueva si es de otro día o de otra versión del generador', () => {
+    const hoy = dia('2026-10-20')
+    expect(demoDesactualizada(generarDemo(hoy).config, hoy)).toBe(false)
+    expect(demoDesactualizada(generarDemo(hoy - 1).config, hoy)).toBe(true)
+    expect(demoDesactualizada({ demoGenerada: hoy, demoVersion: VERSION_DEMO - 1 }, hoy)).toBe(true)
+    expect(demoDesactualizada({ demoGenerada: hoy }, hoy)).toBe(true)
   })
 
   it('al avanzar un día no cambian los costos de semanas pasadas', () => {

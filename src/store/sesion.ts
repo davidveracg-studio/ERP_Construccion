@@ -4,6 +4,7 @@
 // RLS por membresía sigue aplicando.
 import { create } from 'zustand'
 import { hoy } from '../domain/fechas'
+import { demoDesactualizada } from '../domain/seed'
 import { ROLES, type Rol } from '../domain/types'
 import { supabase } from '../lib/supabase'
 import { useStore, USUARIOS } from './store'
@@ -59,7 +60,7 @@ export const useSesion = create<Sesion>()((setS) => ({
       // La demo se genera hasta hoy: la primera visita de cada día la renueva para todos. Es
       // determinista (misma fecha → mismos datos), así que dos visitas simultáneas suben lo mismo.
       const s = useStore.getState()
-      if (s.obras.length === 0 || s.config.demoGenerada !== hoy()) s.reiniciarDemo()
+      if (s.obras.length === 0 || demoDesactualizada(s.config, hoy())) s.reiniciarDemo()
       setS({ estado: 'listo' })
     } catch (e) {
       detenerSync()

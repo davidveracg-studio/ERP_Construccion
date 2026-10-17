@@ -415,6 +415,17 @@ function simular(spec: SpecObra, hoyDia: Dia) {
 }
 
 /**
+ * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
+ * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
+ */
+export const VERSION_DEMO = 2
+
+/** La demo debe regenerarse: es de otro día o de otra versión del generador. */
+export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
+  return c.demoGenerada !== hoyDia || c.demoVersion !== VERSION_DEMO
+}
+
+/**
  * Datos de demostración al día hoyDia. Es determinista (misma fecha → mismos datos e ids):
  * la demo compartida se renueva cada día y dos visitas simultáneas suben lo mismo.
  */
@@ -424,7 +435,7 @@ export function generarDemo(hoyDia: Dia): Datos {
 
 function generar(hoyDia: Dia): Datos {
   const d: Datos = {
-    config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia },
+    config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
     compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [],
   }
