@@ -1,0 +1,45 @@
+# Publica la app en Vercel (producción) con cada cambio en main.
+# La integración Git de Vercel no ve este repo (es de otra cuenta de GitHub), así que se
+# despliega con la CLI: tests → build con las variables de producción de Vercel → deploy.
+# Requiere el secret VERCEL_TOKEN y las variables VERCEL_ORG_ID y VERCEL_PROJECT_ID.
+name: Deploy Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Un despliegue a la vez; si llegan dos merges seguidos, el segundo espera
+concurrency:
+  group: vercel-produccion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Tests y tipos
+        run: npm test && npm run typecheck
+      - run: npm install --global vercel@59.26.0
+      - name: Variables de producción de Vercel
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Build
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+      - name: Deploy
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "Publicado: $url" >> "$GITHUB_STEP_SUMMARY"
