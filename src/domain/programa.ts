@@ -8,13 +8,15 @@ export function fraccionProgramada(a: Pick<Actividad, 'inicio' | 'fin'>, t: Dia)
 
 /**
  * Cantidad programada de cada partida al día t según la línea base.
- * Las partidas sin actividad se distribuyen linealmente en el plazo de la obra.
+ * Las partidas sin actividad se distribuyen linealmente hasta el término del plazo, desde el
+ * inicio de la obra o desde su fecha de inicio propia (p. ej., una obra extraordinaria aprobada).
  */
 export function cantidadesProgramadas(
   lb: Programa | undefined,
   obra: Obra,
   cantidades: Map<string, number>,
   t: Dia,
+  desde: Map<string, Dia> = new Map(),
 ): Map<string, number> {
   const out = new Map<string, number>()
   const cubiertas = new Map<string, number>()
@@ -25,11 +27,12 @@ export function cantidadesProgramadas(
       cubiertas.set(ap.partidaId, (cubiertas.get(ap.partidaId) ?? 0) + ap.cantidad)
     }
   }
-  const fObra = fraccionProgramada({ inicio: obra.fechaInicio, fin: obra.fechaInicio + obra.plazoDias }, t)
+  const fin = obra.fechaInicio + obra.plazoDias
   for (const [pid, cant] of cantidades) {
     const cub = cubiertas.get(pid) ?? 0
     const resto = Math.max(0, cant - cub)
-    if (resto > 0) out.set(pid, (out.get(pid) ?? 0) + resto * fObra)
+    const inicio = Math.min(Math.max(obra.fechaInicio, desde.get(pid) ?? obra.fechaInicio), fin - 1)
+    if (resto > 0) out.set(pid, (out.get(pid) ?? 0) + resto * fraccionProgramada({ inicio, fin }, t))
   }
   return out
 }

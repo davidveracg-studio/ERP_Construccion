@@ -4,6 +4,7 @@
 // líneas quedan congeladas: una observación del mandante obliga a reingresar una versión nueva.
 import type { Datos } from './datos'
 import { finDeMes } from './fechas'
+import { partidaVigente } from './ordenesCambio'
 import type { CondicionesPago, Dia, EstadoPago, LineaEP, Rol } from './types'
 
 export type EtapaEP =
@@ -92,7 +93,7 @@ export function recalcularEP(ep: EstadoPago, cond: CondicionesPago, eps: EstadoP
 }
 
 /** Cantidad validada en RDO hasta el corte que aún no está en otro EP no anulado, por partida. */
-export function pendientePorPartida(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas'>, obraId: string, corte: Dia, excluir?: string) {
+export function pendientePorPartida(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas' | 'ordenesCambio'>, obraId: string, corte: Dia, excluir?: string) {
   const ejecutado = new Map<string, number>()
   for (const r of d.rdos) {
     if (r.obraId !== obraId || r.estado !== 'validado' || r.fecha > corte) continue
@@ -103,8 +104,9 @@ export function pendientePorPartida(d: Pick<Datos, 'rdos' | 'estadosPago' | 'par
     if (e.obraId === obraId && e.id !== excluir && e.anulado == null)
       for (const l of e.lineas) incluido.set(l.partidaId, (incluido.get(l.partidaId) ?? 0) + l.cantidad)
   const out = new Map<string, number>()
+  // Solo se cobran partidas vigentes: una obra extraordinaria espera la aprobación del mandante
   for (const p of d.partidas) {
-    if (p.obraId !== obraId) continue
+    if (p.obraId !== obraId || !partidaVigente(p, d.ordenesCambio, corte)) continue
     const q = Math.min(ejecutado.get(p.id) ?? 0, p.cantidad) - (incluido.get(p.id) ?? 0)
     if (q > 1e-9) out.set(p.id, Math.round(q * 10_000) / 10_000)
   }
@@ -115,7 +117,7 @@ export function pendientePorPartida(d: Pick<Datos, 'rdos' | 'estadosPago' | 'par
  * Líneas del próximo EP al corte: lo validado no incluido en otro EP, valorizado a precio de venta,
  * con un generador por defecto que remite a los RDO.
  */
-export function lineasEP(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas'>, obraId: string, corte: Dia): LineaEP[] {
+export function lineasEP(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas' | 'ordenesCambio'>, obraId: string, corte: Dia): LineaEP[] {
   const pu = new Map(d.partidas.map((p) => [p.id, p.puVenta]))
   return [...pendientePorPartida(d, obraId, corte)].map(([partidaId, cantidad]) => ({
     partidaId, cantidad, monto: Math.round(cantidad * (pu.get(partidaId) ?? 0)),
@@ -225,7 +227,7 @@ export function indicadoresEP(eps: EstadoPago[], t: Dia): IndicadoresEP {
  * RULE-403: el último cierre de mes con avance validado que lleva más de DIAS_PREPARACION_EP
  * días sin EP presentado. Devuelve la fecha de corte atrasada, o null.
  */
-export function epAtrasado(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas'>, obraId: string, t: Dia): Dia | null {
+export function epAtrasado(d: Pick<Datos, 'rdos' | 'estadosPago' | 'partidas' | 'ordenesCambio'>, obraId: string, t: Dia): Dia | null {
   const corte = finDeMes(finDeMes(t) - 31)
   if (t - corte <= DIAS_PREPARACION_EP) return null
   const presentado = d.estadosPago.some((e) => e.obraId === obraId && e.tipo === 'avance' && e.fechaCorte >= corte && vigente(e, t))

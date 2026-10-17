@@ -11,6 +11,8 @@ import { fmtFecha, hoy } from '../domain/fechas'
 import { mm, pct, pp } from '../domain/formato'
 import { useCalc } from '../store/hooks'
 import { EtapaBadge } from './EstadosPago'
+import { EtapaOCBadge } from './OrdenesCambio'
+import { etapaOC, montosOC, TIPOS_OC } from '../domain/ordenesCambio'
 
 export default function PortalMandante() {
   const { d, c } = useCalc()
@@ -19,6 +21,9 @@ export default function PortalMandante() {
   const t = hoy()
   const eps = d.estadosPago.filter((e) => e.obraId === c.obra.id && vigente(e, t)).sort((a, b) => b.numero - a.numero)
   const porAprobar = eps.filter((e) => etapaEP(e, t) === 'presentado')
+  // El mandante ve las órdenes desde que se le presentan
+  const ocs = d.ordenesCambio.filter((o) => o.obraId === c.obra.id && o.presentada != null && o.presentada <= t).sort((a, b) => b.numero - a.numero)
+  const ocsPorAprobar = ocs.filter((o) => etapaOC(o, t) === 'presentada')
   const ind = indicadoresEP(eps, t)
   const aprobado = eps.filter((e) => e.aprobado != null && e.aprobado <= t).reduce((s, e) => s + e.neto, 0)
   const pagado = eps.reduce((s, e) => s + pagadoHasta(e, t), 0)
@@ -36,7 +41,8 @@ export default function PortalMandante() {
         <Kpi etiqueta="Término proyectado" valor={fmtFecha(c.terminoProyectado - 1)}
           sub={c.atrasoProyectado > 0 ? `${c.atrasoProyectado} días después del contractual` : `${-c.atrasoProyectado} días antes del contractual`}
           estado={c.atrasoProyectado > 15 ? 'rojo' : c.atrasoProyectado > 0 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Estados de pago por aprobar" valor={porAprobar.length} sub={porAprobar.length ? mm(porAprobar.reduce((s, e) => s + e.neto, 0)) : 'al día'} />
+        <Kpi etiqueta="Por aprobar" valor={porAprobar.length + ocsPorAprobar.length}
+          sub={porAprobar.length + ocsPorAprobar.length ? `${porAprobar.length} EP · ${ocsPorAprobar.length} órdenes de cambio` : 'al día'} />
         <Kpi etiqueta="Aprobado / pagado" valor={mm(aprobado)} sub={`pagado ${mm(pagado)}`} />
       </div>
 
@@ -45,7 +51,16 @@ export default function PortalMandante() {
           <CurvaS puntos={serie} corte={c.corte} modo="avance" />
         </Card>
         <Card titulo="Por aprobar">
-          {porAprobar.length === 0 ? <p className="text-sm text-slate-500">No hay estados de pago esperando su aprobación.</p> : (
+          {ocsPorAprobar.map((o) => (
+            <div key={o.id} className="mb-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">Orden de cambio N° {o.numero}</span><span className="tabular font-semibold">{mm(montosOC(o).venta)}</span>
+              </div>
+              <div className="mt-0.5 text-xs text-slate-600">{o.titulo}{o.diasPlazo ? ` · ${o.diasPlazo > 0 ? '+' : ''}${o.diasPlazo} días de plazo` : ''}</div>
+              <Link to={`/ordenes-cambio/${o.id}`} className="mt-2 inline-block text-sm font-medium text-marca hover:underline">Revisar y aprobar o rechazar →</Link>
+            </div>
+          ))}
+          {porAprobar.length === 0 ? (ocsPorAprobar.length === 0 && <p className="text-sm text-slate-500">No hay estados de pago ni órdenes de cambio esperando su aprobación.</p>) : (
             <ul className="space-y-3">
               {porAprobar.map((e) => (
                 <li key={e.id} className="rounded-lg border border-slate-200 p-3">
@@ -64,6 +79,22 @@ export default function PortalMandante() {
           </p>
         </Card>
       </div>
+
+      <Card titulo="Órdenes de cambio">
+        {ocs.length === 0 ? <p className="text-sm text-slate-500">Sin órdenes de cambio presentadas.</p> : (
+          <ul className="space-y-2 text-sm">
+            {ocs.map((o) => (
+              <li key={o.id} className="flex flex-wrap items-center justify-between gap-2">
+                <Link to={`/ordenes-cambio/${o.id}`} className="min-w-0 hover:underline">
+                  <span className="font-medium">N° {o.numero} · {o.titulo}</span>
+                  <span className="ml-2 text-xs text-slate-500">{TIPOS_OC[o.tipo]}{o.diasPlazo ? ` · ${o.diasPlazo > 0 ? '+' : ''}${o.diasPlazo} días` : ''}</span>
+                </Link>
+                <span className="flex items-center gap-2"><span className="tabular">{mm(montosOC(o).venta)}</span><EtapaOCBadge oc={o} t={t} /></span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       <Card titulo="Estados de pago">
         {eps.length === 0 ? <Vacio titulo="Sin estados de pago presentados" texto="Aquí aparecerán los estados de pago que presente la constructora." /> : (

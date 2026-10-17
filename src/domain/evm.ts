@@ -5,6 +5,7 @@ import { calcularCPM, type ResultadoCPM } from './cpm'
 import { programaDe, type Datos } from './datos'
 import { diaSemana, diasHabilesEntre } from './fechas'
 import { bacPartida, costoHHPres, hhPorUnidad, puCosto, puCostoTipo, ventaPartida } from './presupuesto'
+import { partidaVigente } from './ordenesCambio'
 import { avanceActividades, cantidadesProgramadas } from './programa'
 import type { Actividad, AjusteForecast, Confianza, Cuadrilla, Dia, Obra, Partida, Programa, TipoRecurso } from './types'
 
@@ -62,6 +63,9 @@ export interface CalcObra {
   acNoProd: number
   acSinImputar: number
   provisionSub: number
+  /** Partidas extraordinarias con avance o costo cuya orden de cambio no aprobó el mandante (RULE-105). */
+  extraNoAprobado: { p: Partida; cantEjec: number; monto: number; costo: number }[]
+  acExtraNoAprobado: number
   // Totales obra
   bac: number
   pv: number
@@ -114,6 +118,11 @@ export interface CalcObra {
 const TIPOS: TipoRecurso[] = ['MO', 'MAT', 'EQ', 'SUB', 'OTRO']
 const ceroTipos = (): Record<TipoRecurso, number> => ({ MO: 0, MAT: 0, EQ: 0, SUB: 0, OTRO: 0 })
 
+/** Inicio programado propio de las partidas que lo tienen (obras extraordinarias aprobadas). */
+function desdePartidas(partidas: Partida[]) {
+  return new Map(partidas.filter((p) => p.inicioProgramado != null).map((p) => [p.id, p.inicioProgramado!]))
+}
+
 export function hhDeRegistro(r: { trabajadores: number; horasNormales: number; horasExtra: number }) {
   return r.trabajadores * (r.horasNormales + r.horasExtra)
 }
@@ -131,7 +140,11 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   const obra = d.obras.find((o) => o.id === obraId)
   if (!obra) throw new Error(`Obra ${obraId} no existe`)
   const u = d.config.umbrales
-  const partidas = d.partidas.filter((p) => p.obraId === obraId)
+  // Las partidas extraordinarias de órdenes de cambio no aprobadas por el mandante no cuentan en
+  // presupuesto, venta ni avance; su costo sí (ver extraNoAprobado y RULE-105)
+  const todas = d.partidas.filter((p) => p.obraId === obraId)
+  const partidas = todas.filter((p) => partidaVigente(p, d.ordenesCambio, corte))
+  const pendientes = todas.filter((p) => !partidas.includes(p))
   const cuadrillas = new Map(d.cuadrillas.filter((c) => c.obraId === obraId).map((c) => [c.id, c]))
   const lb = programaDe(d, obraId, 'lineaBase')
   const actualizado = programaDe(d, obraId, 'actualizado') ?? lb
@@ -205,7 +218,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
 
   // --- Programado ---
   const cantidades = new Map(partidas.map((p) => [p.id, p.cantidad]))
-  const cantProg = cantidadesProgramadas(lb, obra, cantidades, corte)
+  const cantProg = cantidadesProgramadas(lb, obra, cantidades, corte, desdePartidas(partidas))
 
   // --- Plazo (CPM sobre programa actualizado con reales) ---
   const pesos = new Map(partidas.map((p) => [p.id, puCosto(p)]))
@@ -294,6 +307,16 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
     }
   })
 
+  // Trabajo extraordinario sin orden aprobada: costo incurrido sin venta ni presupuesto
+  const extraNoAprobado = pendientes
+    .map((p) => {
+      const at = acTipo.get(p.id) ?? ceroTipos()
+      const ce = cantEjec.get(p.id) ?? 0
+      return { p, cantEjec: ce, monto: ce * p.puVenta, costo: TIPOS.reduce((s, t) => s + at[t], 0) + (acMO.get(p.id) ?? 0) }
+    })
+    .filter((x) => x.cantEjec > 0 || x.costo > 0)
+  const acExtraNoAprobado = extraNoAprobado.reduce((s, x) => s + x.costo, 0)
+
   const suma = (f: (c: CalcPartida) => number) => calc.reduce((s, c) => s + f(c), 0)
   const bacDir = suma((c) => c.bac)
   const pvDir = suma((c) => c.pv)
@@ -310,8 +333,8 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   const bac = bacDir + ggBac
   const pv = pvDir + ggPv
   const ev = evDir + ggPv
-  const ac = acDir + ggAc + acSinImputar
-  const eac = eacDir + ggEac + acSinImputar
+  const ac = acDir + ggAc + acSinImputar + acExtraNoAprobado
+  const eac = eacDir + ggEac + acSinImputar + acExtraNoAprobado
   const venta = suma((c) => c.venta)
   const hhProductivas = [...hhReal.values()].reduce((s, v) => s + v, 0)
   const hhPresAvance = suma((c) => (c.rendPres != null && c.hhReal > 0 ? c.hhPres : 0))
@@ -348,7 +371,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   const calculado = {
     obra, corte, partidas: calc,
     bacDir, pvDir, evDir, acDir, eacDir,
-    ggBac, ggPv, ggAc, ggEac, acNoProd, acSinImputar, provisionSub,
+    ggBac, ggPv, ggAc, ggEac, acNoProd, acSinImputar, provisionSub, extraNoAprobado, acExtraNoAprobado,
     bac, pv, ev, ac,
     cv: ev - ac, sv: ev - pv,
     cpi: ac > 0 ? ev / ac : null,
@@ -412,9 +435,9 @@ export function serieCurvaS(d: Datos, obraId: string, corte: Dia): PuntoSerie[] 
 /** Solo lo planificado (PV) a una fecha futura, sin recorrer registros reales. */
 export function calcularObraPlan(d: Datos, obraId: string, t: Dia) {
   const obra = d.obras.find((o) => o.id === obraId)!
-  const partidas = d.partidas.filter((p) => p.obraId === obraId)
+  const partidas = d.partidas.filter((p) => p.obraId === obraId && partidaVigente(p, d.ordenesCambio, t))
   const lb = programaDe(d, obraId, 'lineaBase')
-  const cp = cantidadesProgramadas(lb, obra, new Map(partidas.map((p) => [p.id, p.cantidad])), t)
+  const cp = cantidadesProgramadas(lb, obra, new Map(partidas.map((p) => [p.id, p.cantidad])), t, desdePartidas(partidas))
   let pvDir = 0
   let bacDir = 0
   for (const p of partidas) {

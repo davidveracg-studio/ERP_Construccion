@@ -2,6 +2,7 @@
 import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { epAtrasado } from './estadosPago'
+import { ETAPAS_OC, etapaOC } from './ordenesCambio'
 import { desglosePartida, paretoActividades, paretoCuadrillas } from './explicacion'
 import { fmtFecha } from './fechas'
 import { idx, mm, num, pct, pp, signoPct } from './formato'
@@ -29,6 +30,7 @@ export interface Candidata {
 
 export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-101': 'RDO / avance / HH no registrados',
+  'RULE-105': 'Trabajo extraordinario sin orden de cambio aprobada',
   'RULE-106': 'Atraso de obra (SPI)',
   'RULE-107': 'Hito en riesgo o vencido',
   'RULE-108': 'Actividad crítica atrasada',
@@ -332,6 +334,29 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       porQue: `El mandante no ha pagado el EP N° ${ep.numero} y el plazo venció hace ${dias} días.`,
       accionRequerida: dias > 15 ? 'Escalar la cobranza con el mandante y evaluar las medidas del contrato.' : 'Enviar recordatorio de pago al mandante.',
       responsable: dias > 15 ? o.administrador : o.oficinaTecnica,
+    })
+  }
+
+  // RULE-105 (v1.1): avance o costo en partidas extraordinarias sin orden aprobada por el mandante
+  for (const x of c.extraNoAprobado) {
+    const oc = d.ordenesCambio.find((z) => z.id === x.p.ordenCambioId)
+    const etapa = oc ? etapaOC(oc, c.corte) : null
+    const rechazada = etapa === 'rechazada'
+    out.push({
+      regla: 'RULE-105', clave: `RULE-105|${x.p.id}`, severidad: rechazada ? 'critica' : 'alta',
+      titulo: `${rechazada ? 'Costo no recuperable' : 'Trabajo en riesgo de no pago'}: ${x.p.descripcion}`, entidad: x.p.descripcion,
+      datos: [
+        { etiqueta: 'Orden de cambio', valor: oc ? `N° ${oc.numero} · ${etapa ? ETAPAS_OC[etapa] : ''}` : '—' },
+        { etiqueta: 'Ejecutado sin respaldo (venta)', valor: mm(x.monto) },
+        { etiqueta: 'Costo incurrido', valor: mm(x.costo) },
+      ],
+      porQue: rechazada
+        ? 'El mandante rechazó la orden de cambio y la partida ya tiene avance o costo.'
+        : 'Hay avance o costo en una partida extraordinaria cuya orden de cambio aún no aprueba el mandante.',
+      accionRequerida: rechazada
+        ? 'Detener el trabajo y negociar con el mandante el reconocimiento del costo.'
+        : 'Gestionar la aprobación de la orden de cambio antes de seguir ejecutando.',
+      responsable: o.administrador,
     })
   }
 
