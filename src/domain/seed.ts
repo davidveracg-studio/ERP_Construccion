@@ -14,7 +14,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio,
 } from './types'
 
 function rng(seed: number) {
@@ -519,6 +519,166 @@ function contratoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'obligaciones' | 'gara
   }
 }
 
+/** Gestión documental de la demo: planos con revisiones al día en terreno, RFI, submittals y Libro de Obra, sin vencidos. */
+function documentalDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'documentos' | 'rfis' | 'submittals' | 'folios'> {
+  const obra = (id: string) => d.obras.find((o) => o.id === id)!
+  const H = hoyDia
+  const ito = (o: Obra) => `ITO ${o.mandante}`
+  const documentos: Documento[] = []
+  const rfis: RFI[] = []
+  const submittals: Submittal[] = []
+  const folios: Folio[] = []
+
+  const doc = (obraId: string, codigo: string, titulo: string, tipo: Documento['tipo'], especialidad: Documento['especialidad'], revs: [string, Dia, string?][], partidas: string[] = []) => {
+    const o = obra(obraId)
+    const revisiones = revs.map(([revision, fecha, motivo], k) => ({ id: `rev${k + 1}`, revision, fecha, motivo, publicadaPor: o.oficinaTecnica }))
+    const vig = revisiones.at(-1)!
+    documentos.push({
+      id: `doc_${obraId}_${codigo}`, obraId, codigo, titulo, tipo, especialidad, revisiones, partidaIds: partidas.map((p) => `${obraId}_p${p}`),
+      enTerreno: { revisionId: vig.id, fecha: Math.min(vig.fecha + 1, H - 1), por: o.jefeTerreno }, creado: revisiones[0].fecha,
+    })
+  }
+  const rfi = (obraId: string, numero: number, x: Pick<RFI, 'asunto' | 'pregunta' | 'disciplina' | 'destinatario'> & {
+    creado: Dia; limite?: Dia; pasos?: [RFI['historial'][number]['estado'], Dia, string?][]; partidas?: string[]; impacto?: RFI['impacto']; ordenCambioId?: string; riesgoId?: string; documento?: string
+  }) => {
+    const o = obra(obraId)
+    rfis.push({
+      id: `rfi_${obraId}_${numero}`, obraId, numero, asunto: x.asunto, pregunta: x.pregunta, disciplina: x.disciplina, destinatario: x.destinatario, fechaLimite: x.limite,
+      impacto: x.impacto, partidaIds: (x.partidas ?? []).map((p) => `${obraId}_p${p}`), documentoId: x.documento ? `doc_${obraId}_${x.documento}` : undefined,
+      historial: (x.pasos ?? []).map(([estado, fecha, texto]) => ({ fecha, estado, por: estado === 'respondido' ? (x.destinatario === 'proyectista' ? 'Oficina de cálculo' : ito(o)) : o.oficinaTecnica, ...(texto ? { texto } : {}) })),
+      ordenCambioId: x.ordenCambioId, riesgoId: x.riesgoId, creado: x.creado, creadoPor: o.oficinaTecnica,
+    })
+  }
+  const sub = (obraId: string, numero: number, revision: number, x: Pick<Submittal, 'titulo' | 'tipo' | 'descripcion'> & {
+    proveedor?: string; partidas?: string[]; requerida?: Dia; creado: Dia; pasos?: [Submittal['historial'][number]['estado'], Dia, string?][]
+  }) => {
+    const o = obra(obraId)
+    const id = `sub_${obraId}_${numero}_${revision}`
+    submittals.push({
+      id, obraId, numero, revision, titulo: x.titulo, tipo: x.tipo, descripcion: x.descripcion, proveedor: x.proveedor, partidaIds: (x.partidas ?? []).map((p) => `${obraId}_p${p}`),
+      fechaRequerida: x.requerida, reemplazaA: revision > 0 ? `sub_${obraId}_${numero}_${revision - 1}` : undefined,
+      historial: (x.pasos ?? []).map(([estado, fecha, texto]) => ({ fecha, estado, por: estado === 'enviado' ? o.oficinaTecnica : ito(o), ...(texto ? { texto } : {}) })),
+      creado: x.creado, creadoPor: o.oficinaTecnica,
+    })
+  }
+  const folio = (obraId: string, fecha: Dia, emisor: Folio['emisor'], tipo: Folio['tipo'], texto: string, extra: Partial<Pick<Folio, 'plazoRespuesta' | 'respondeA'>> = {}) => {
+    const o = obra(obraId)
+    const numero = folios.filter((f) => f.obraId === obraId).length + 1
+    const f: Folio = { id: `fol_${obraId}_${numero}`, obraId, numero, fecha, autor: emisor === 'mandante' ? ito(o) : o.administrador, emisor, tipo, texto, ...extra }
+    folios.push(f)
+    return f.id
+  }
+
+  // Edificio Los Aromos
+  const a = obra('obra_aromos'), A = a.fechaInicio
+  doc('obra_aromos', 'A-101', 'Planta de arquitectura pisos tipo', 'plano', 'arquitectura', [['A', A - 20], ['0', A + 5, 'Emitido para construcción'], ['1', H - 30, 'Albañilería en shafts en vez de tabiquería (OC N° 2)']], ['4.1'])
+  doc('obra_aromos', 'E-201', 'Planta de losas y vigas', 'plano', 'estructura', [['A', A - 20], ['0', A + 3, 'Emitido para construcción'], ['1', A + 60, 'Refuerzo de vigas del eje 4']], ['3.2', '3.3'])
+  doc('obra_aromos', 'E-301', 'Muro de contención deslinde poniente', 'plano', 'estructura', [['0', A + 44, 'Obra extraordinaria OC N° 1']])
+  doc('obra_aromos', 'S-101', 'Instalaciones sanitarias, planta tipo', 'plano', 'sanitaria', [['0', A + 2, 'Emitido para construcción']], ['6.1'])
+  doc('obra_aromos', 'EL-101', 'Instalaciones eléctricas, planta tipo', 'plano', 'electrica', [['0', A + 2, 'Emitido para construcción'], ['1', H - 5, 'Reubicación de tableros de piso']], ['6.2'])
+  doc('obra_aromos', 'EETT-AR', 'Especificaciones técnicas de arquitectura', 'eett', 'arquitectura', [['0', A, 'Versión de licitación']], ['5.1', '5.2', '5.3'])
+  rfi('obra_aromos', 1, {
+    asunto: 'Nivel de sello de fundación en sector norte', pregunta: 'El estudio de suelos indica sello a −2,40 m, pero en la excavación aparece suelo competente a −2,10 m. ¿Se acepta el sello a −2,10 m?',
+    disciplina: 'estructura', destinatario: 'proyectista', creado: A + 8, limite: A + 15, partidas: ['2.1', '3.1'],
+    pasos: [['emitido', A + 8], ['respondido', A + 12, 'Se acepta sello a −2,10 m previa visita del mecánico de suelos.'], ['cerrado', A + 13]],
+  })
+  rfi('obra_aromos', 2, {
+    asunto: 'Relleno no informado en deslinde poniente', pregunta: 'La excavación dejó expuesto un relleno no informado en el deslinde poniente. Se solicita definir la solución de contención.',
+    disciplina: 'estructura', destinatario: 'mandante', creado: A + 38, limite: A + 45, partidas: ['2.1'], impacto: { monto: 10_830_000, dias: 5 }, documento: 'E-301', ordenCambioId: 'oc_obra_aromos_1',
+    pasos: [['emitido', A + 38], ['respondido', A + 41, 'Ejecutar muro de contención H-25 según plano E-301 que emitirá la oficina de cálculo.'], ['cerrado', A + 44, 'Origina la OC N° 1.']],
+  })
+  rfi('obra_aromos', 3, {
+    asunto: 'Formato cerámico equivalente', pregunta: 'El cerámico especificado está con quiebre de stock. ¿Se acepta un formato nacional equivalente en tono y PEI?',
+    disciplina: 'arquitectura', destinatario: 'mandante', creado: A + 76, limite: A + 83, partidas: ['5.2'], riesgoId: 'rs_obra_aromos_5', documento: 'EETT-AR',
+    pasos: [['emitido', A + 76], ['respondido', A + 81, 'Se acepta el formato equivalente sujeto a aprobación de muestra (submittal).'], ['cerrado', A + 82]],
+  })
+  rfi('obra_aromos', 4, {
+    asunto: 'Altura de shafts en albañilería', pregunta: 'Con el cambio a albañilería en shafts, ¿la altura de los muros llega a losa o a cielo falso?',
+    disciplina: 'arquitectura', destinatario: 'mandante', creado: H - 12, limite: H - 5, partidas: ['4.1'], documento: 'A-101',
+    pasos: [['emitido', H - 12], ['respondido', H - 6, 'Los muros de shaft llegan a losa, con sello cortafuego en el encuentro.']],
+  })
+  rfi('obra_aromos', 5, {
+    asunto: 'Armadura de vigas del piso 5', pregunta: 'El revisor independiente observó la armadura de las vigas del piso 5. Se solicita confirmar la armadura definitiva antes del hormigonado.',
+    disciplina: 'estructura', destinatario: 'proyectista', creado: H - 18, limite: H + 4, partidas: ['3.2', '3.3'], impacto: { monto: 14_000_000, dias: 6 }, documento: 'E-201', riesgoId: 'rs_obra_aromos_7',
+    pasos: [['emitido', H - 18], ['respondido', H - 10, 'Se mantiene la armadura; el revisor pide detalle de anclajes.'], ['emitido', H - 8, 'Falta el detalle de anclajes solicitado por el revisor.']],
+  })
+  rfi('obra_aromos', 6, {
+    asunto: 'Ubicación de tableros eléctricos del piso 3', pregunta: 'El tablero del piso 3 queda sobre el shaft de aguas lluvias. ¿Se puede desplazar 1,2 m hacia el pasillo?',
+    disciplina: 'electrica', destinatario: 'proyectista', creado: H - 1, partidas: ['6.2'], documento: 'EL-101',
+  })
+  sub('obra_aromos', 1, 0, {
+    titulo: 'Dosificación de hormigón H-30', tipo: 'ficha_tecnica', descripcion: 'Diseño de mezcla y certificados de áridos de la planta.', proveedor: 'Hormigones del Norte', partidas: ['3.2'],
+    creado: A + 4, requerida: A + 12, pasos: [['enviado', A + 5], ['aprobado', A + 9]],
+  })
+  sub('obra_aromos', 2, 0, {
+    titulo: 'Muestra de cerámico equivalente', tipo: 'muestra', descripcion: 'Cerámico nacional 60×60 en reemplazo del importado.', proveedor: 'Cerámicas del Pacífico', partidas: ['5.2'],
+    creado: A + 78, requerida: H + 20, pasos: [['enviado', A + 79], ['rechazado', A + 85, 'El tono no coincide con la muestra de referencia.']],
+  })
+  sub('obra_aromos', 2, 1, {
+    titulo: 'Muestra de cerámico equivalente', tipo: 'muestra', descripcion: 'Cerámico nacional 60×60, tono corregido.', proveedor: 'Cerámicas del Pacífico', partidas: ['5.2'],
+    creado: A + 86, requerida: H + 20, pasos: [['enviado', A + 88], ['aprobado_con_observaciones', A + 92, 'Aprobado. Comprar en un solo lote para asegurar el tono.']],
+  })
+  sub('obra_aromos', 3, 0, {
+    titulo: 'Plano de taller de barandas metálicas', tipo: 'plano_taller', descripcion: 'Barandas de balcones y escaleras, con detalle de anclajes.', proveedor: 'Maestranza Elqui',
+    creado: H - 7, requerida: H + 10, pasos: [['enviado', H - 6]],
+  })
+  sub('obra_aromos', 4, 0, { titulo: 'Ficha técnica de grifería', tipo: 'ficha_tecnica', descripcion: 'Grifería de baños y cocinas.', partidas: ['6.1'], creado: H - 2, requerida: H + 30 })
+  folio('obra_aromos', A, 'contratista', 'comunicacion', 'Se inician las obras. Entrega de terreno conforme según acta.')
+  const f1 = folio('obra_aromos', A + 20, 'mandante', 'instruccion', 'Tras las lluvias, reforzar la entibación del talud norte antes de continuar la excavación.')
+  folio('obra_aromos', A + 21, 'contratista', 'respuesta', 'Se refuerza la entibación con tablestacas y se retoma la excavación con visto bueno del calculista.', { respondeA: f1 })
+  const f2 = folio('obra_aromos', A + 60, 'mandante', 'observacion', 'Recubrimiento de la enfierradura de vigas del eje 4 bajo lo especificado. Corregir antes de hormigonar.')
+  folio('obra_aromos', A + 61, 'contratista', 'respuesta', 'Se reponen separadores de 2,5 cm en todas las vigas del eje 4. Se solicita nueva inspección.', { respondeA: f2 })
+  folio('obra_aromos', H - 12, 'contratista', 'comunicacion', 'Se emite el RFI N° 4 por la altura de los muros de shaft.')
+  folio('obra_aromos', H - 2, 'mandante', 'instruccion', 'Presentar el programa de terminaciones actualizado con la OC N° 2.', { plazoRespuesta: H + 5 })
+
+  // Remodelación clínica
+  const c = obra('obra_clinica'), C = c.fechaInicio
+  doc('obra_clinica', 'AR-01', 'Planta de arquitectura, sector remodelado', 'plano', 'arquitectura', [['0', C - 5, 'Emitido para construcción'], ['1', C + 20, 'Reubicación del box de procedimientos']], ['2.1', '2.2'])
+  doc('obra_clinica', 'CL-01', 'Climatización, planta y esquema', 'plano', 'climatizacion', [['0', C + 2, 'Emitido para construcción']], ['4.2'])
+  doc('obra_clinica', 'EL-01', 'Instalaciones eléctricas y tableros', 'plano', 'electrica', [['0', C + 2, 'Emitido para construcción'], ['1', H - 10, 'Tablero de respaldo con grupo electrógeno']], ['4.1'])
+  rfi('obra_clinica', 1, {
+    asunto: 'Cielos modulares sobre el pabellón 2', pregunta: 'Sobre el pabellón 2 hay ductos existentes a 2,45 m. ¿Se baja el cielo a 2,40 m en ese recinto?',
+    disciplina: 'arquitectura', destinatario: 'mandante', creado: C + 8, limite: C + 15, partidas: ['2.2'],
+    pasos: [['emitido', C + 8], ['respondido', C + 13, 'Se acepta cielo a 2,40 m solo en el pabellón 2.'], ['cerrado', C + 14]],
+  })
+  rfi('obra_clinica', 2, {
+    asunto: 'Conexión de climatización al chiller existente', pregunta: 'Se solicita confirmar el punto de conexión al chiller existente y la ventana de corte del sistema.',
+    disciplina: 'climatizacion', destinatario: 'mandante', creado: H - 5, limite: H + 5, partidas: ['4.2'], documento: 'CL-01', pasos: [['emitido', H - 5]],
+  })
+  sub('obra_clinica', 1, 0, {
+    titulo: 'Fichas técnicas de equipos de climatización', tipo: 'ficha_tecnica', descripcion: 'Unidades manejadoras y fan coils.', proveedor: 'Clima Norte SpA', partidas: ['4.2'],
+    creado: C + 20, requerida: C + 28, pasos: [['enviado', C + 21], ['aprobado', C + 24]],
+  })
+  sub('obra_clinica', 2, 0, {
+    titulo: 'Muestra de pavimento vinílico', tipo: 'muestra', descripcion: 'Pavimento vinílico conductivo para áreas clínicas.', proveedor: 'Pisos Clínicos Ltda.', partidas: ['3.1'],
+    creado: H - 5, requerida: H + 12, pasos: [['enviado', H - 4]],
+  })
+  folio('obra_clinica', C, 'contratista', 'comunicacion', 'Se inician los trabajos en el sector a remodelar, aislado del área clínica.')
+  const f3 = folio('obra_clinica', C + 10, 'mandante', 'instruccion', 'Los trabajos ruidosos se ejecutarán solo entre las 20:00 y las 07:00.')
+  folio('obra_clinica', C + 11, 'contratista', 'respuesta', 'Se reprograma la tabiquería y las demoliciones en turno nocturno desde mañana.', { respondeA: f3 })
+  folio('obra_clinica', H - 3, 'mandante', 'comunicacion', 'Se informa visita del comité de infecciones intrahospitalarias para la próxima semana.')
+
+  // Centro de bodegas (terminado)
+  const b = obra('obra_bodegas'), B = b.fechaInicio
+  const recepcion = d.recepciones.find((r) => r.obraId === 'obra_bodegas')?.fecha ?? H - 30
+  doc('obra_bodegas', 'AR-01', 'Planta general de bodegas', 'plano', 'arquitectura', [['0', B - 10, 'Emitido para construcción']])
+  doc('obra_bodegas', 'ES-01', 'Estructura metálica, marcos y costaneras', 'plano', 'estructura', [['0', B - 10, 'Emitido para construcción'], ['1', B + 25, 'Arriostramiento adicional por viento']], ['4.1'])
+  doc('obra_bodegas', 'CU-01', 'Cubierta y revestimientos', 'plano', 'arquitectura', [['0', B - 10, 'Emitido para construcción']], ['5.1'])
+  rfi('obra_bodegas', 1, {
+    asunto: 'Arriostramiento de marcos por viento', pregunta: 'Con el viento de la zona, ¿se refuerza el arriostramiento de los marcos extremos?',
+    disciplina: 'estructura', destinatario: 'proyectista', creado: B + 18, limite: B + 25, partidas: ['4.1'], documento: 'ES-01',
+    pasos: [['emitido', B + 18], ['respondido', B + 24, 'Se agregan diagonales en los marcos extremos según revisión 1 del ES-01.'], ['cerrado', B + 25]],
+  })
+  sub('obra_bodegas', 1, 0, {
+    titulo: 'Plano de taller de estructura metálica', tipo: 'plano_taller', descripcion: 'Despiece de marcos, uniones apernadas y placas base.', proveedor: 'Maestranza Elqui', partidas: ['4.1'],
+    creado: B + 26, requerida: B + 35, pasos: [['enviado', B + 27], ['aprobado', B + 31]],
+  })
+  folio('obra_bodegas', B, 'contratista', 'comunicacion', 'Se inician las obras. Entrega de terreno conforme.')
+  const f4 = folio('obra_bodegas', recepcion, 'mandante', 'observacion', 'Se recibe provisoriamente la obra con las observaciones del acta N° 1.')
+  folio('obra_bodegas', recepcion + 1, 'contratista', 'respuesta', 'Se programan las subsanaciones del acta N° 1 dentro de los plazos indicados.', { respondeA: f4 })
+  return { documentos, rfis, submittals, folios }
+}
+
 /** Registro de riesgos de la demo: vivos en distintas etapas (exposición bajo la contingencia) y cerrados. */
 function riesgosDemo(d: Datos, hoyDia: Dia): Riesgo[] {
   const obra = (id: string) => d.obras.find((o) => o.id === id)!
@@ -715,7 +875,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 6
+export const VERSION_DEMO = 7
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -734,7 +894,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -768,6 +928,8 @@ function generar(hoyDia: Dia): Datos {
   d.obras = d.obras.map((o) => ({ ...o, estado: estadoObraPorRecepcion(d.recepciones, o.id, hoyDia - 1, o.estado) }))
   // Registro de riesgos
   d.riesgos.push(...riesgosDemo(d, hoyDia))
+  // Planos, RFI, submittals y Libro de Obra
+  Object.assign(d, documentalDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

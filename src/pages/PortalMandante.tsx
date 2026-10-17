@@ -14,6 +14,8 @@ import { EtapaBadge } from './EstadosPago'
 import { EtapaOCBadge } from './OrdenesCambio'
 import { DetalleRecepcion } from './Contrato'
 import { etapaOC, montosOC, TIPOS_OC } from '../domain/ordenesCambio'
+import { estadoRFI, estadoSubmittal, folioPendiente, TIPOS_SUBMITTAL } from '../domain/documental'
+import { EstadoRFIBadge, EstadoSubmittalBadge } from './Documentos'
 
 export default function PortalMandante() {
   const { d, c } = useCalc()
@@ -30,6 +32,10 @@ export default function PortalMandante() {
   const aprobado = eps.filter((e) => e.aprobado != null && e.aprobado <= t).reduce((s, e) => s + e.neto, 0)
   const pagado = eps.reduce((s, e) => s + pagadoHasta(e, t), 0)
   const desvio = c.avanceReal - c.avancePlan
+  // RFI emitidos y submittals enviados (lo que está en borrador es interno)
+  const rfis = d.rfis.filter((r) => r.obraId === c.obra.id && ['emitido', 'respondido'].includes(estadoRFI(r, t) ?? '')).sort((a, b) => b.numero - a.numero)
+  const subs = d.submittals.filter((s) => s.obraId === c.obra.id && estadoSubmittal(s, t) === 'enviado').sort((a, b) => b.numero - a.numero)
+  const foliosEnEspera = d.folios.filter((f) => f.obraId === c.obra.id && folioPendiente(f, d.folios, t, d.config.diasHabiles)).length
 
   return (
     <div className="space-y-4">
@@ -88,6 +94,25 @@ export default function PortalMandante() {
           <p className="mt-2 text-xs text-slate-500">Cuando la constructora subsana una observación, usted da su V°B° para cerrarla.</p>
         </Card>
       )}
+
+      <Card titulo="Consultas y aprobaciones" accion={<Link to="/libro-obra" className="text-sm text-marca hover:underline">Libro de Obra{foliosEnEspera ? ` · ${foliosEnEspera} folio(s) esperan respuesta del contratista` : ''}</Link>}>
+        {rfis.length + subs.length === 0 ? <p className="text-sm text-slate-500">No hay RFI ni submittals esperando.</p> : (
+          <ul className="divide-y divide-slate-100 text-sm">
+            {rfis.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <Link to={`/rfi/${r.id}`} className="font-medium text-marca hover:underline">RFI N° {r.numero} · {r.asunto}</Link>
+                <span className="flex items-center gap-2 text-xs text-slate-500">{r.fechaLimite != null && estadoRFI(r, t) === 'emitido' && `responder hasta ${fmtFecha(r.fechaLimite)}`}<EstadoRFIBadge r={r} t={t} /></span>
+              </li>
+            ))}
+            {subs.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <Link to={`/submittals/${s.id}`} className="font-medium text-marca hover:underline">Submittal N° {s.numero} rev. {s.revision} · {s.titulo}</Link>
+                <span className="flex items-center gap-2 text-xs text-slate-500">{TIPOS_SUBMITTAL[s.tipo]}<EstadoSubmittalBadge s={s} t={t} /></span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       <Card titulo="Órdenes de cambio">
         {ocs.length === 0 ? <p className="text-sm text-slate-500">Sin órdenes de cambio presentadas.</p> : (
