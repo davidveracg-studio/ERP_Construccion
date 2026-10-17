@@ -34,6 +34,7 @@ const NAV: Item[] = [
   { to: '/alertas', etiqueta: 'Alertas y acciones', roles: ['R01', 'R02', 'R03', 'R05'], icono: '⚑' },
   { to: '/costos', etiqueta: 'Control de costos', roles: ['R01', 'R02', 'R05'], icono: '$' },
   { to: '/programa', etiqueta: 'Carta Gantt', roles: ['R01', 'R02', 'R03', 'R05'], icono: '▤' },
+  { to: '/4d', etiqueta: 'Simulación 4D', roles: ['R01', 'R02', 'R03', 'R05'], icono: '◆' },
   { to: '/terreno', etiqueta: 'Validación y rendimientos', roles: ['R02', 'R03'], icono: '✓' },
   { to: '/rdo', etiqueta: 'Reporte diario (RDO)', roles: ['R03', 'R04'], icono: '✎' },
   { to: '/cierre', etiqueta: 'Cierre semanal', roles: ['R02', 'R05'], icono: '⏹' },

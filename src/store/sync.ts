@@ -231,6 +231,9 @@ export function vaciarStore() {
   useStore.getState().cargarDatos(datosVacios())
 }
 
+/** Empresa con sesión abierta ('' en modo local o antes de ingresar). */
+export const empresaActual = () => empresaId
+
 /** Fuerza subir lo pendiente (p. ej., antes de cerrar sesión). */
 export const sincronizarAhora = () => subir()
 

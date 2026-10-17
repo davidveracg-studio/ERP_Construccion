@@ -65,6 +65,49 @@ export interface Obra {
   /** Presupuesto de gastos generales (indirectos) total. */
   ggPresupuesto: number
   estado: EstadoObra
+  /** Modelo 4D guardado; si no existe se infiere desde el programa. */
+  modelo4d?: Modelo4D
+}
+
+/** Capa constructiva del modelo 4D paramétrico. */
+export type Capa = 'terreno' | 'fundaciones' | 'estructura' | 'muros' | 'instalaciones' | 'terminaciones'
+
+/** Actividad del programa enlazada a una capa de uno o más pisos (piso 0 = nivel de terreno). */
+export interface EnlaceModelo {
+  actividadId: string
+  capa: Capa
+  pisos: number[]
+}
+
+/** Nivel (IfcBuildingStorey) de un modelo BIM y el piso del modelo 4D al que corresponde (0 = terreno). */
+export interface NivelIfc {
+  nombre: string
+  elevacion: number
+  piso: number
+}
+
+/** Modelo BIM (IFC) subido para la obra. El archivo vive en Supabase Storage (o en el navegador en modo local). */
+export interface ArchivoIfc {
+  ruta: string
+  nombre: string
+  bytes: number
+  fecha: Dia
+  subidoPor: string
+  niveles: NivelIfc[]
+}
+
+/**
+ * Modelo 4D: el edificio se genera desde la planta y el número de pisos (paramétrico) o
+ * se lee de un IFC. En ambos casos las actividades se enlazan a capas y pisos.
+ */
+export interface Modelo4D {
+  pisos: number
+  /** Planta en metros (solo modelo paramétrico). */
+  largo: number
+  ancho: number
+  alturaPiso: number
+  enlaces: EnlaceModelo[]
+  ifc?: ArchivoIfc
 }
 
 export type TipoDependencia = 'FC' | 'CC' | 'FF' | 'CF'

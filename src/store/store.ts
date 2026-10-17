@@ -11,7 +11,7 @@ import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  Obra, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
+  Modelo4D, Obra, Partida, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
 } from '../domain/types'
 
 export interface UI {
@@ -55,6 +55,8 @@ export interface Acciones {
   crearObra: (o: Obra, partidas: Partida[], actividades: Actividad[], cuadrillas: Cuadrilla[]) => void
   reemplazarPartidas: (obraId: string, partidas: Partida[]) => void
   cargarPrograma: (obraId: string, actividades: Actividad[]) => void
+  /** Guarda el modelo 4D de la obra; undefined vuelve al modelo inferido del programa. */
+  guardarModelo4D: (obraId: string, modelo: Modelo4D | undefined) => void
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -229,12 +231,14 @@ export const useStore = create<Estado>()(
               ],
             }
           }),
+        guardarModelo4D: (obraId, modelo) =>
+          mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, modelo4d: modelo } : o)) })),
       }
     },
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 2,
+      version: 3,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

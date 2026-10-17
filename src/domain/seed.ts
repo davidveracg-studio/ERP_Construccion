@@ -1,9 +1,11 @@
 // Datos de demostración: simula día a día dos obras (producción, HH, clima,
 // costos semanales importados) y cierra los períodos semanales pasados con el
 // mismo motor que usa la aplicación.
+import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
 import { CONFIG_DEFECTO, type Datos } from './datos'
 import { diaSemana } from './fechas'
+import { inferirModelo } from './modelo4d'
 import { hhPorUnidad } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
@@ -376,6 +378,18 @@ export function generarDemo(hoyDia: Dia): Datos {
     d.costos.push(...s.costos)
     d.compromisos.push(...s.compromisos)
     d.reglasMapeo.push(...s.reglas)
+  }
+  // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
+  const aromos = d.obras.find((o) => o.id === 'obra_aromos')
+  const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades
+  if (aromos && actsAromos) {
+    aromos.modelo4d = {
+      ...inferirModelo(actsAromos),
+      ifc: {
+        ruta: RUTA_IFC_DEMO, nombre: 'edificio-los-aromos.ifc', bytes: 0, fecha: aromos.fechaInicio, subidoPor: aromos.oficinaTecnica,
+        niveles: [{ nombre: 'Fundaciones', elevacion: -1.2, piso: 0 }, ...[1, 2, 3, 4, 5].map((k) => ({ nombre: `Piso ${k}`, elevacion: Math.round((k - 1) * 2.6 * 10) / 10, piso: k }))],
+      },
+    }
   }
   // Cierre de períodos semanales pasados (viernes)
   for (const o of d.obras) {

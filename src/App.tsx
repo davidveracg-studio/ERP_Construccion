@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'
 import { modoNube } from './lib/supabase'
@@ -20,6 +20,9 @@ import RDOPage from './pages/RDO'
 import Terreno from './pages/Terreno'
 import { useSesion } from './store/sesion'
 import { useStore } from './store/store'
+
+// three.js pesa: la simulación 4D se carga solo al abrirla
+const Obra4D = lazy(() => import('./pages/Obra4D'))
 
 const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos' } as const
 
@@ -53,6 +56,7 @@ function Rutas() {
               <Route path="costos" element={<Costos />} />
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
+              <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />
               <Route path="cierre" element={<Cierre />} />
