@@ -1,17 +1,21 @@
-// Simulación 4D: la obra en el tiempo sobre un modelo paramétrico. Contorno = línea base,
-// sólido = avance real (validado en RDO) hasta hoy y proyección del CPM después.
+// Simulación 4D: la obra en el tiempo sobre un modelo paramétrico o BIM (IFC). Contorno =
+// línea base, sólido = avance real (validado en RDO) hasta hoy y proyección del CPM después.
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import Vista4D, { COLOR_ESTADO, type Modo4D } from '../components/Vista4D'
+import Vista4D, { COLOR_ESTADO, type ModeloBim, type Modo4D } from '../components/Vista4D'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
+import { agruparIfc, RUTA_IFC_DEMO } from '../domain/bim'
 import { serieCurvaS } from '../domain/evm'
-import { fmtFecha } from '../domain/fechas'
-import { pct, pp } from '../domain/formato'
+import { fmtFecha, hoy } from '../domain/fechas'
+import { num, pct, pp } from '../domain/formato'
+import { borrarIfc, MAX_BYTES_IFC, subirIfc } from '../ifc/archivos'
+import { geometriaIfc, leerIfc, precargarIfc, useGeometriaIfc } from '../ifc/cargar'
+import type { GeometriaIfc } from '../ifc/extraer'
 import {
   CAPAS, CAPAS_TERRENO, ESTADOS_4D, actividadesEnCurso, elementosDe, estadoElementos, interpolarSerie, leerPisos,
   lineaTiempo4D, modeloDe, textoPisos, type Estado4D,
 } from '../domain/modelo4d'
-import type { Actividad, Capa, EnlaceModelo, Modelo4D } from '../domain/types'
+import type { Actividad, ArchivoIfc, Capa, EnlaceModelo, Modelo4D, NivelIfc } from '../domain/types'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
 
@@ -35,6 +39,9 @@ export default function Obra4D() {
   const estados = useMemo(() => (linea && c ? estadoElementos(elementos, linea, t, c) : []), [elementos, linea, t, c])
   const enCurso = useMemo(() => (linea && c ? actividadesEnCurso(linea, t, c) : []), [linea, t, c])
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
+  const carga = useGeometriaIfc(modelo?.ifc?.ruta)
+  const geo = carga.estado === 'listo' ? carga.geo : null
+  const bim = useMemo<ModeloBim | null>(() => (geo ? { geo, grupos: agruparIfc(geo.niveles, geo.elementos) } : null), [geo])
 
   // Al cambiar de obra se vuelve a hoy
   useEffect(() => { if (c) { setT(c.corte); setReproduciendo(false) } }, [obra?.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -84,8 +91,13 @@ export default function Obra4D() {
         <Card className="overflow-hidden">
           <div className="-m-4">
             <div className="relative h-[52vh] min-h-[320px] bg-slate-100">
-              {elementos.length > 0 ? (
-                <Vista4D modelo={modelo} estados={estados} modo={modo} girar={reproduciendo} />
+              {modelo.ifc && carga.estado === 'cargando' ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-sm text-slate-600">
+                  <span>Cargando modelo BIM… {pct(carga.progreso, 0)}</span>
+                  <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-marca transition-all" style={{ width: `${carga.progreso * 100}%` }} /></div>
+                </div>
+              ) : elementos.length > 0 ? (
+                <Vista4D modelo={modelo} bim={bim} estados={estados} modo={modo} girar={reproduciendo} />
               ) : (
                 <div className="flex h-full items-center justify-center p-6 text-center text-sm text-slate-500">
                   Ninguna actividad del programa está enlazada al modelo.{puedeEditar && <> Usa “Configurar modelo”.</>}
@@ -94,6 +106,8 @@ export default function Obra4D() {
               <div className="pointer-events-none absolute bottom-3 left-3 flex flex-wrap gap-2">
                 <Badge tono={momento.tono}>{momento.texto}</Badge>
                 {!obra.modelo4d && <Badge>Modelo inferido de la Carta Gantt</Badge>}
+                {modelo.ifc && carga.estado !== 'error' && <Badge>BIM · {modelo.ifc.nombre}</Badge>}
+                {carga.estado === 'error' && <Badge tono="rojo">No se pudo cargar el IFC: {carga.error} Se muestra el modelo paramétrico.</Badge>}
               </div>
               <div className="absolute right-3 top-3 flex overflow-hidden rounded-lg border border-slate-300 bg-white text-xs shadow-sm">
                 {(['estado', 'realista'] as const).map((m) => (
@@ -168,8 +182,32 @@ export default function Obra4D() {
   )
 }
 
+/** IFC elegido en el editor (aún sin guardar o ya guardado en la obra). */
+interface IfcElegido {
+  ruta?: string
+  nombre: string
+  bytes?: Uint8Array
+  tamano: number
+  niveles: NivelIfc[]
+  pisos: number
+  geo?: GeometriaIfc
+  sinCapa?: number
+}
+
+function resumenIfc(geo: GeometriaIfc) {
+  const g = agruparIfc(geo.niveles, geo.elementos)
+  return { niveles: g.niveles, pisos: g.pisos, sinCapa: g.sinCapa }
+}
+
 function EditorModelo({ modelo, acts, guardado, obraId, onCerrar }: { modelo: Modelo4D; acts: Actividad[]; guardado: boolean; obraId: string; onCerrar: () => void }) {
   const guardar = useStore((s) => s.guardarModelo4D)
+  const usuario = useStore((s) => s.ui.usuario)
+  const [fuente, setFuente] = useState<'parametrico' | 'bim'>(modelo.ifc ? 'bim' : 'parametrico')
+  const [ifc, setIfc] = useState<IfcElegido | null>(() =>
+    modelo.ifc ? { ruta: modelo.ifc.ruta, nombre: modelo.ifc.nombre, tamano: modelo.ifc.bytes, niveles: modelo.ifc.niveles, pisos: modelo.pisos } : null)
+  const [leyendo, setLeyendo] = useState<number | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string>()
   const [dim, setDim] = useState({ pisos: modelo.pisos, largo: modelo.largo, ancho: modelo.ancho, alturaPiso: modelo.alturaPiso })
   const [filas, setFilas] = useState(() => {
     const porAct = new Map(modelo.enlaces.map((e) => [e.actividadId, e]))
@@ -178,29 +216,137 @@ function EditorModelo({ modelo, acts, guardado, obraId, onCerrar }: { modelo: Mo
       return { act: a, capa: (e?.capa ?? '') as Capa | '', pisos: e ? textoPisos(e.pisos, modelo.pisos) : 'todos' }
     })
   })
+  const bimMode = fuente === 'bim'
+  const pisos = bimMode ? (ifc?.pisos ?? 1) : dim.pisos
   const dimOk = dim.pisos >= 1 && dim.pisos <= 80 && dim.largo >= 4 && dim.ancho >= 4 && dim.alturaPiso >= 2
-  const leidas = filas.map((f) => (f.capa && !CAPAS_TERRENO.includes(f.capa) ? leerPisos(f.pisos, dim.pisos) : [0]))
-  const ok = dimOk && leidas.every((p) => p != null)
+  const leidas = filas.map((f) => (f.capa && !CAPAS_TERRENO.includes(f.capa) ? leerPisos(f.pisos, pisos) : [0]))
+  const ok = (bimMode ? !!ifc && leyendo == null : dimOk) && leidas.every((p) => p != null) && !guardando
 
-  const enviar = () => {
-    const enlaces: EnlaceModelo[] = filas.flatMap((f, i) => (f.capa ? [{ actividadId: f.act.id, capa: f.capa, pisos: leidas[i]! }] : []))
-    guardar(obraId, { ...dim, enlaces })
+  const leer = async (obtener: () => Promise<{ geo: GeometriaIfc; elegido: Omit<IfcElegido, 'niveles' | 'pisos' | 'geo'> }>) => {
+    setError(undefined)
+    setLeyendo(0)
+    try {
+      const { geo, elegido } = await obtener()
+      setIfc({ ...elegido, geo, ...resumenIfc(geo) })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLeyendo(null)
+    }
+  }
+  const elegirArchivo = (archivo: File | undefined) => {
+    if (!archivo) return
+    if (!/\.ifc$/i.test(archivo.name)) { setError('El archivo debe ser .ifc (exportado desde Revit, ArchiCAD, Tekla u otro).'); return }
+    if (archivo.size > MAX_BYTES_IFC) { setError('El archivo supera el máximo de 50 MB.'); return }
+    leer(async () => {
+      const bytes = new Uint8Array(await archivo.arrayBuffer())
+      return { geo: await leerIfc(bytes, setLeyendo), elegido: { nombre: archivo.name, bytes, tamano: archivo.size } }
+    })
+  }
+  const usarEjemplo = () =>
+    leer(async () => ({ geo: await geometriaIfc(RUTA_IFC_DEMO, setLeyendo), elegido: { ruta: RUTA_IFC_DEMO, nombre: 'edificio-los-aromos.ifc', tamano: 0 } }))
+
+  const enviar = async () => {
+    setGuardando(true)
+    setError(undefined)
+    try {
+      const enlaces: EnlaceModelo[] = filas.flatMap((f, i) => (f.capa ? [{ actividadId: f.act.id, capa: f.capa, pisos: leidas[i]! }] : []))
+      let archivo: ArchivoIfc | undefined
+      if (bimMode && ifc) {
+        if (ifc.ruta && ifc.ruta === modelo.ifc?.ruta) archivo = modelo.ifc
+        else {
+          const ruta = ifc.ruta ?? (await subirIfc(obraId, ifc.nombre, ifc.bytes!))
+          if (ifc.geo) precargarIfc(ruta, ifc.geo)
+          archivo = { ruta, nombre: ifc.nombre, bytes: ifc.tamano, fecha: hoy(), subidoPor: usuario, niveles: ifc.niveles }
+        }
+      }
+      guardar(obraId, { ...dim, pisos, enlaces, ...(archivo ? { ifc: archivo } : {}) })
+      // El archivo anterior deja de usarse
+      if (modelo.ifc && modelo.ifc.ruta !== archivo?.ruta) borrarIfc(modelo.ifc.ruta)
+      onCerrar()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGuardando(false)
+    }
+  }
+  const restablecer = () => {
+    guardar(obraId, undefined)
+    if (modelo.ifc) borrarIfc(modelo.ifc.ruta)
     onCerrar()
   }
-  const num = (k: keyof typeof dim) => (
+  const numero = (k: keyof typeof dim) => (
     <input type="number" step={k === 'pisos' ? 1 : 0.1} className={inputCls} value={dim[k]} onChange={(e) => setDim({ ...dim, [k]: Number(e.target.value) })} />
+  )
+  const selectorArchivo = (texto: string, cls: string) => (
+    <label className={cls}>
+      {texto}
+      <input type="file" accept=".ifc" className="sr-only" onChange={(e) => { elegirArchivo(e.target.files?.[0]); e.target.value = '' }} />
+    </label>
   )
 
   return (
     <Modal abierto titulo="Configurar modelo 4D" onCerrar={onCerrar}>
-      <p className="mb-3 text-sm text-slate-600">El edificio se genera con estas medidas. Cada actividad avanza sobre su capa y sus pisos, de abajo hacia arriba.</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Campo etiqueta="Pisos">{num('pisos')}</Campo>
-        <Campo etiqueta="Largo (m)">{num('largo')}</Campo>
-        <Campo etiqueta="Ancho (m)">{num('ancho')}</Campo>
-        <Campo etiqueta="Altura piso (m)">{num('alturaPiso')}</Campo>
+      <div className="mb-3 inline-flex overflow-hidden rounded-lg border border-slate-300 text-sm" role="radiogroup" aria-label="Fuente del modelo">
+        {(['parametrico', 'bim'] as const).map((f) => (
+          <button key={f} role="radio" aria-checked={fuente === f} onClick={() => setFuente(f)}
+            className={cx('px-3 py-1.5', fuente === f ? 'bg-slate-800 text-white' : 'text-slate-700 hover:bg-slate-50')}>
+            {f === 'parametrico' ? 'Paramétrico' : 'Modelo BIM (IFC)'}
+          </button>
+        ))}
       </div>
-      {!dimOk && <p className="mt-2 text-xs text-crit">Revisa las medidas: 1 a 80 pisos, planta de al menos 4 m y altura de piso de al menos 2 m.</p>}
+
+      {!bimMode ? (
+        <>
+          <p className="mb-3 text-sm text-slate-600">El edificio se genera con estas medidas. Cada actividad avanza sobre su capa y sus pisos, de abajo hacia arriba.</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Campo etiqueta="Pisos">{numero('pisos')}</Campo>
+            <Campo etiqueta="Largo (m)">{numero('largo')}</Campo>
+            <Campo etiqueta="Ancho (m)">{numero('ancho')}</Campo>
+            <Campo etiqueta="Altura piso (m)">{numero('alturaPiso')}</Campo>
+          </div>
+          {!dimOk && <p className="mt-2 text-xs text-crit">Revisa las medidas: 1 a 80 pisos, planta de al menos 4 m y altura de piso de al menos 2 m.</p>}
+        </>
+      ) : (
+        <div className="rounded-lg border border-slate-200 p-3 text-sm">
+          {leyendo != null ? (
+            <div className="space-y-2 py-2 text-center text-slate-600">
+              <div>Leyendo IFC… {pct(leyendo, 0)}</div>
+              <div className="mx-auto h-2 w-48 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-marca" style={{ width: `${leyendo * 100}%` }} /></div>
+            </div>
+          ) : ifc ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <span className="break-all font-medium text-slate-800">{ifc.nombre}{ifc.ruta === RUTA_IFC_DEMO && ' (ejemplo)'}</span>
+                {ifc.tamano > 0 && <span className="tabular shrink-0 text-xs text-slate-500">{num(ifc.tamano / 1048576, 1)} MB</span>}
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {ifc.geo && `${ifc.geo.elementos.length - (ifc.sinCapa ?? 0)} elementos · `}{ifc.pisos} piso(s)
+                {!!ifc.sinCapa && ` · ${ifc.sinCapa} sin capa (no se dibujan)`}
+              </div>
+              <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                {ifc.niveles.map((n, i) => (
+                  <li key={i} className="flex justify-between gap-2">
+                    <span className="truncate">{n.nombre} <span className="tabular text-slate-400">({n.elevacion >= 0 ? '+' : ''}{num(n.elevacion, 2)} m)</span></span>
+                    <span className="shrink-0">→ {n.piso === 0 ? 'Terreno / fundaciones' : `Piso ${n.piso}`}</span>
+                  </li>
+                ))}
+              </ul>
+              {selectorArchivo('Reemplazar archivo', 'mt-2 inline-block cursor-pointer text-marca hover:underline')}
+            </>
+          ) : (
+            <div className="space-y-2 text-center">
+              {selectorArchivo('Elegir archivo .ifc (máx. 50 MB)', 'block cursor-pointer rounded-lg border-2 border-dashed border-slate-300 p-4 text-slate-700 hover:border-marca hover:text-marca')}
+              <button onClick={usarEjemplo} className="text-sm text-marca hover:underline">o usar el modelo BIM de ejemplo</button>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-slate-500">
+            Cada elemento se asigna solo: pilares, vigas y losas → estructura; muros → muros; ventanas, puertas y cielos → terminaciones;
+            cañerías y ductos → instalaciones. El piso sale del nivel del IFC.
+          </p>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-crit">{error}</p>}
 
       <div className="mt-4 text-xs font-medium text-slate-500">Actividades → capa y pisos (“todos”, “3”, “1-4”, “1, 3”)</div>
       <ul className="mt-2 max-h-[40vh] space-y-2 overflow-auto pr-1">
@@ -222,10 +368,11 @@ function EditorModelo({ modelo, acts, guardado, obraId, onCerrar }: { modelo: Mo
       </ul>
 
       <div className="mt-4 flex flex-wrap justify-between gap-2">
-        <Boton variante="fantasma" disabled={!guardado} onClick={() => { guardar(obraId, undefined); onCerrar() }}>Volver al automático</Boton>
+        <Boton variante="fantasma" disabled={!guardado || guardando} onClick={restablecer}
+          title={modelo.ifc ? 'Vuelve al modelo inferido de la Carta Gantt y borra el IFC de la obra' : undefined}>Volver al automático</Boton>
         <div className="flex gap-2">
-          <Boton variante="secundario" onClick={onCerrar}>Cancelar</Boton>
-          <Boton disabled={!ok} onClick={enviar}>Guardar</Boton>
+          <Boton variante="secundario" onClick={onCerrar} disabled={guardando}>Cancelar</Boton>
+          <Boton disabled={!ok} onClick={enviar}>{guardando ? (bimMode && ifc && !ifc.ruta ? 'Subiendo…' : 'Guardando…') : 'Guardar'}</Boton>
         </div>
       </div>
     </Modal>

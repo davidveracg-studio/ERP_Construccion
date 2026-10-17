@@ -79,14 +79,35 @@ export interface EnlaceModelo {
   pisos: number[]
 }
 
-/** Modelo 4D paramétrico: el edificio se genera desde la planta y el número de pisos. */
+/** Nivel (IfcBuildingStorey) de un modelo BIM y el piso del modelo 4D al que corresponde (0 = terreno). */
+export interface NivelIfc {
+  nombre: string
+  elevacion: number
+  piso: number
+}
+
+/** Modelo BIM (IFC) subido para la obra. El archivo vive en Supabase Storage (o en el navegador en modo local). */
+export interface ArchivoIfc {
+  ruta: string
+  nombre: string
+  bytes: number
+  fecha: Dia
+  subidoPor: string
+  niveles: NivelIfc[]
+}
+
+/**
+ * Modelo 4D: el edificio se genera desde la planta y el número de pisos (paramétrico) o
+ * se lee de un IFC. En ambos casos las actividades se enlazan a capas y pisos.
+ */
 export interface Modelo4D {
   pisos: number
-  /** Planta en metros. */
+  /** Planta en metros (solo modelo paramétrico). */
   largo: number
   ancho: number
   alturaPiso: number
   enlaces: EnlaceModelo[]
+  ifc?: ArchivoIfc
 }
 
 export type TipoDependencia = 'FC' | 'CC' | 'FF' | 'CF'

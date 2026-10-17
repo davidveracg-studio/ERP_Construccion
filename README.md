@@ -22,7 +22,7 @@ La app tiene dos modos según las variables de entorno:
 
 ### Configurar Supabase (una vez)
 
-1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql` y luego `0002_demo.sql` (ambos idempotentes).
+1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql` y `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM). Todos son idempotentes.
 2. **Authentication → Sign In / Providers** → activar *Allow anonymous sign-ins*.
 3. Copiar `.env.example` a `.env.local` con la URL y la clave **anon public** del proyecto. La clave `service_role` nunca va en el frontend.
 
@@ -40,7 +40,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Alertas y acciones | `/alertas` — 14 reglas del núcleo (RULE-101…609), acciones correctivas con verificación automática de efectividad | 10 §28, 12 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
 | Carta Gantt | `/programa` — línea base vs proyectado, ruta crítica (CPM con FC/CC/FF/CF, desfases y hitos contractuales como fecha límite), re-baseline con aprobación de R01 | 10 §23, RF-PLA |
-| Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (contorno de línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación; modelo inferido de los nombres de actividades y editable | fase 1 (fase 2: importar IFC) |
+| Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) o **BIM (IFC)** enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación. Los elementos IFC se asignan solos a capa (por clase) y piso (por nivel); modelo de ejemplo en `public/demo` | — |
 | RDO del capataz | `/rdo` — móvil, avance en cantidades + HH por partida + HH no productivas | 17 §4.1, 20 §6.1 |
 | Validación y rendimientos | `/terreno` — el jefe de terreno valida/devuelve; HH/unidad real vs APU por cuadrilla | 10 §5 |
 | Cierre semanal | `/cierre` — checklist de completitud, snapshot inmutable, evaluación de reglas | 17 §4.2 |
@@ -54,7 +54,8 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 src/domain/     Motor puro en TypeScript (sin React): lo que en producción correría en Edge Functions
   cpm.ts          Ruta crítica, holguras, proyección con reales y límites de hitos
   evm.ts          EVM por partida/obra, forecast, provisión de subcontratos, HH, confianza de datos
-  modelo4d.ts     Modelo 4D paramétrico: inferencia desde el programa, avance por elemento y línea de tiempo
+  modelo4d.ts     Modelo 4D: inferencia desde el programa, avance por capa/piso y línea de tiempo
+  bim.ts          IFC → capas y pisos (clase IFC, niveles), orden constructivo de los elementos
   explicacion.ts  Descomposición determinista de desviaciones (suma = AC − EV) y Paretos
   reglas.ts       Reglas de alerta temprana del MVP
   periodos.ts     Cierre de período: snapshot, ciclo de vida de alertas, efectividad de acciones
@@ -64,6 +65,8 @@ src/store/      Estado (zustand) con caché en IndexedDB por empresa
   sync.ts         Sincronización con Supabase: diff contra la última versión confirmada, lotes, reintentos, realtime
   sesion.ts       Ingreso a la demo (sesión anónima + unirse_demo)
 src/lib/        Cliente de Supabase
+src/ifc/        Lectura de IFC con web-ifc en un web worker, caché y archivos en Supabase Storage
+scripts/        ifc-demo.mjs: genera el modelo BIM de ejemplo (public/demo)
 supabase/       Migraciones SQL (esquema, RLS, funciones, realtime)
 src/pages/      Workspaces por rol
 src/components/ Design system y gráficos SVG (Curva S, Gantt, cascada, Pareto)

@@ -1,14 +1,23 @@
-// Visor 3D de la simulación 4D (three.js). El edificio paramétrico se construye una vez por
-// modelo; al mover la fecha solo cambian la escala, visibilidad y color de cada elemento.
-// Cada parte crece desde una esquina a lo largo de un eje según el avance del elemento.
+// Visor 3D de la simulación 4D (three.js). El edificio se construye una vez por modelo; al
+// mover la fecha solo cambian escala, visibilidad y color. En el modelo paramétrico cada parte
+// crece desde una esquina según el avance; en un modelo BIM (IFC) se muestran construidos los
+// primeros elementos de cada capa/piso en orden constructivo.
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { elementosConstruidos, type AgrupacionIfc } from '../domain/bim'
 import { CAPAS, ESTADOS_4D, type Estado4D, type EstadoElemento } from '../domain/modelo4d'
 import { pct } from '../domain/formato'
 import type { Capa, Modelo4D } from '../domain/types'
+import type { GeometriaIfc } from '../ifc/extraer'
 
 export type Modo4D = 'estado' | 'realista'
+
+/** Modelo BIM leído y agrupado por capa y piso. */
+export interface ModeloBim {
+  geo: GeometriaIfc
+  grupos: AgrupacionIfc
+}
 
 /** Mismos tonos que el semáforo (index.css). */
 export const COLOR_ESTADO: Record<Estado4D, string> = {
@@ -29,6 +38,8 @@ interface Visual {
   mat: THREE.MeshStandardMaterial
   partes: Parte[]
   fantasma: Parte[]
+  /** Elementos IFC del grupo en orden constructivo. */
+  ifc?: THREE.Mesh[]
 }
 
 /** Partes de un elemento (coordenadas de la esquina mínima, en metros). */
@@ -107,7 +118,7 @@ function aplicar(p: Parte, f: number) {
 }
 
 interface Motor {
-  construir: (m: Modelo4D) => void
+  construir: (m: Modelo4D, bim: ModeloBim | null) => void
   actualizar: (estados: EstadoElemento[], modo: Modo4D) => void
   girar: (si: boolean) => void
   destruir: () => void
@@ -141,6 +152,10 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   const bordes = new THREE.EdgesGeometry(caja)
   const matFantasma = new THREE.MeshBasicMaterial({ color: '#64748b', transparent: true, opacity: 0.08, depthWrite: false })
   const matBorde = new THREE.LineBasicMaterial({ color: '#475569', transparent: true, opacity: 0.55 })
+  // Elementos IFC: colores del archivo (por vértice); vidrios aparte; fantasma = plan sin construir
+  const matIfc = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })
+  const matIfcVidrio = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.2, transparent: true, opacity: 0.5, depthWrite: false })
+  const matFantasmaIfc = new THREE.MeshBasicMaterial({ color: '#64748b', transparent: true, opacity: 0.13, depthWrite: false })
 
   // Entorno fijo: suelo y árboles
   const suelo = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: '#e5e7eb', roughness: 1 }))
@@ -158,6 +173,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   const pluma = new THREE.Group()
   const matGrua = new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.6 })
   scene.add(grua)
+  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc])
 
   function caja3(s: Spec, mat: THREE.Material) {
     const mesh = new THREE.Mesh(caja, mat)
@@ -169,30 +185,71 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   }
 
   function limpiar(g: THREE.Group) {
+    for (const m of (g.userData.materiales ?? []) as THREE.Material[]) m.dispose()
     g.traverse((o) => {
       if (o instanceof THREE.Mesh && o.geometry !== caja) o.geometry.dispose()
-      if (o instanceof THREE.Mesh && o.material !== matFantasma && o.material !== matGrua) (o.material as THREE.Material).dispose()
+      if (o instanceof THREE.Mesh && !fijos.has(o.material as THREE.Material)) (o.material as THREE.Material).dispose()
     })
     g.removeFromParent()
   }
 
-  function construir(m: Modelo4D) {
+  const nuevoMaterial = (capa: Capa) => {
+    const vidrio = capa === 'terminaciones'
+    return new THREE.MeshStandardMaterial({ color: COLOR_CAPA[capa], roughness: vidrio ? 0.2 : 0.85, metalness: vidrio ? 0.1 : 0, transparent: vidrio, opacity: vidrio ? 0.6 : 1 })
+  }
+
+  function construirBim(bim: ModeloBim) {
+    const mallas = new Map(bim.geo.mallas.map((x) => [x.id, x]))
+    const elementos = new Map(bim.geo.elementos.map((x) => [x.id, x]))
+    const sombras = bim.geo.mallas.length < 4000
+    for (const [clave, ids] of bim.grupos.grupos) {
+      const [capa, piso] = clave.split('|') as [Capa, string]
+      const mat = nuevoMaterial(capa)
+      const v: Visual = { capa, piso: Number(piso), mat, partes: [], fantasma: [], ifc: [] }
+      // El material del grupo no cuelga de ninguna malla al limpiar: se libera aparte
+      edificio.userData.materiales = [...(edificio.userData.materiales ?? []), mat]
+      for (const id of ids) {
+        const x = mallas.get(id)
+        if (!x) continue
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.BufferAttribute(x.posiciones, 3))
+        g.setAttribute('normal', new THREE.BufferAttribute(x.normales, 3))
+        g.setAttribute('color', new THREE.BufferAttribute(x.colores, 3))
+        g.setIndex(new THREE.BufferAttribute(x.indices, 1))
+        const original = x.transparente ? matIfcVidrio : matIfc
+        const mesh = new THREE.Mesh(g, original)
+        mesh.receiveShadow = sombras
+        const el = elementos.get(id)
+        mesh.userData = { clave, original, sombra: sombras && !x.transparente, nombre: el?.nombre }
+        edificio.add(mesh)
+        v.ifc!.push(mesh)
+      }
+      visuales.set(clave, v)
+    }
+  }
+
+  function construir(m: Modelo4D, bim: ModeloBim | null) {
     limpiar(edificio)
     limpiar(entorno)
     edificio = new THREE.Group()
     entorno = new THREE.Group()
     scene.add(edificio, entorno)
     visuales = new Map()
-    const { largo: L, ancho: A, alturaPiso: H, pisos } = m
-    const alto = pisos * H
+    // Con IFC las medidas salen de la caja envolvente del modelo (ya centrado en planta)
+    const L = bim ? bim.geo.max[0] - bim.geo.min[0] : m.largo
+    const A = bim ? bim.geo.max[2] - bim.geo.min[2] : m.ancho
+    const alto = bim ? bim.geo.max[1] : m.pisos * m.alturaPiso
+    const { pisos } = m
+    if (bim) construirBim(bim)
 
-    const capas: Capa[] = ['terreno', 'fundaciones', 'estructura', 'muros', 'instalaciones', 'terminaciones']
+    // El movimiento de tierra no viene en el IFC: se dibuja igual que en el paramétrico
+    const capas: Capa[] = bim ? ['terreno'] : ['terreno', 'fundaciones', 'estructura', 'muros', 'instalaciones', 'terminaciones']
+    const dims = { ...m, largo: L, ancho: A }
     for (const capa of capas) {
       const niveles = capa === 'terreno' || capa === 'fundaciones' ? [0] : Array.from({ length: pisos }, (_, i) => i + 1)
       for (const piso of niveles) {
-        const vidrio = capa === 'terminaciones'
-        const mat = new THREE.MeshStandardMaterial({ color: COLOR_CAPA[capa], roughness: vidrio ? 0.2 : 0.85, metalness: vidrio ? 0.1 : 0, transparent: vidrio, opacity: vidrio ? 0.6 : 1 })
-        const { solidas, fantasma } = partesDe(capa, piso, m)
+        const mat = nuevoMaterial(capa)
+        const { solidas, fantasma } = partesDe(capa, piso, dims)
         const v: Visual = { capa, piso, mat, partes: [], fantasma: [] }
         const clave = `${capa}|${piso}`
         for (const s of solidas) {
@@ -272,14 +329,23 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       const e = ultimos.get(clave)
       const real = e?.real ?? 0
       const plan = e?.plan ?? 0
+      const natural = modo === 'realista' || !e || e.estado === 'terminado' || e.estado === 'pendiente'
+      if (v.ifc) {
+        const hechos = elementosConstruidos(v.ifc.length, real)
+        const planeados = elementosConstruidos(v.ifc.length, plan)
+        v.ifc.forEach((mesh, i) => {
+          mesh.visible = i < Math.max(hechos, planeados)
+          mesh.material = i < hechos ? (natural ? mesh.userData.original : v.mat) : matFantasmaIfc
+          mesh.castShadow = i < hechos && mesh.userData.sombra
+        })
+      }
       for (const p of v.partes) aplicar(p, real)
       for (const p of v.fantasma) {
         aplicar(p, plan)
         p.mesh.visible = p.mesh.visible && plan > real + 0.005
       }
-      const terminado = !e || e.estado === 'terminado' || e.estado === 'pendiente'
-      v.mat.color.set(modo === 'realista' || terminado ? COLOR_CAPA[v.capa] : COLOR_ESTADO[e.estado])
-      if (v.capa === 'terminaciones') v.mat.opacity = modo === 'realista' || terminado ? 0.6 : 0.9
+      v.mat.color.set(natural ? COLOR_CAPA[v.capa] : COLOR_ESTADO[e!.estado])
+      if (v.capa === 'terminaciones') v.mat.opacity = natural ? 0.6 : 0.9
       if (v.capa === 'estructura' && e) {
         if (real > 0) estructuraIniciada = true
         if (real < 1) estructuraPendiente = true
@@ -299,9 +365,13 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
     const e = hit && ultimos.get(hit.object.userData.clave as string)
     if (!e) { onTip(null); return }
     const nivel = e.elemento.piso === 0 ? 'Terreno' : `Piso ${e.elemento.piso}`
+    const nombre = hit.object.userData.nombre as string | undefined
     onTip({
       x: ev.clientX - rect.left, y: ev.clientY - rect.top,
-      texto: [`${nivel} · ${CAPAS[e.elemento.capa]}`, `Plan ${pct(e.plan, 0)} · Real ${pct(e.real, 0)}`, ESTADOS_4D[e.estado]],
+      texto: [
+        ...(nombre ? [nombre] : []),
+        `${nivel} · ${CAPAS[e.elemento.capa]}`, `Plan ${pct(e.plan, 0)} · Real ${pct(e.real, 0)}`, ESTADOS_4D[e.estado],
+      ],
     })
   }
   const alSalir = () => onTip(null)
@@ -333,7 +403,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   pedir()
 
   return {
-    construir: (m) => { construir(m); pedir() },
+    construir: (m, bim) => { construir(m, bim); pedir() },
     actualizar: (e, modo) => { actualizar(e, modo); pedir() },
     girar: (si) => { controls.autoRotate = si; pedir() },
     destruir: () => {
@@ -354,7 +424,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   }
 }
 
-export default function Vista4D({ modelo, estados, modo, girar }: { modelo: Modelo4D; estados: EstadoElemento[]; modo: Modo4D; girar: boolean }) {
+export default function Vista4D({ modelo, bim = null, estados, modo, girar }: { modelo: Modelo4D; bim?: ModeloBim | null; estados: EstadoElemento[]; modo: Modo4D; girar: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const motor = useRef<Motor | null>(null)
   const [tip, setTip] = useState<{ x: number; y: number; texto: string[] } | null>(null)
@@ -364,8 +434,8 @@ export default function Vista4D({ modelo, estados, modo, girar }: { modelo: Mode
     motor.current = m
     return () => { m.destruir(); motor.current = null }
   }, [])
-  useEffect(() => { motor.current?.construir(modelo) }, [modelo])
-  useEffect(() => { motor.current?.actualizar(estados, modo) }, [estados, modo, modelo])
+  useEffect(() => { motor.current?.construir(modelo, bim) }, [modelo, bim])
+  useEffect(() => { motor.current?.actualizar(estados, modo) }, [estados, modo, modelo, bim])
   useEffect(() => { motor.current?.girar(girar) }, [girar])
 
   return (
@@ -373,9 +443,7 @@ export default function Vista4D({ modelo, estados, modo, girar }: { modelo: Mode
       {tip && (
         <div className="pointer-events-none absolute z-10 rounded-md bg-slate-900/90 px-2 py-1 text-xs text-white shadow"
           style={{ left: Math.min(tip.x + 12, (ref.current?.clientWidth ?? 0) - 170), top: Math.max(tip.y - 52, 4) }}>
-          <div className="font-medium">{tip.texto[0]}</div>
-          <div className="tabular">{tip.texto[1]}</div>
-          <div>{tip.texto[2]}</div>
+          {tip.texto.map((t, i) => <div key={i} className={i === 0 ? 'font-medium' : 'tabular'}>{t}</div>)}
         </div>
       )}
     </div>
