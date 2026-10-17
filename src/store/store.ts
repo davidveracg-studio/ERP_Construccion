@@ -13,11 +13,12 @@ import { calcularObra } from '../domain/evm'
 import { hoy } from '../domain/fechas'
 import { uid } from '../domain/formato'
 import { cerrarPeriodo, periodosDe } from '../domain/periodos'
+import { aplicarAccionRiesgo, accionesRiesgo, puedeCrearRiesgo, type AccionRiesgo, type DatosAccionRiesgo } from '../domain/riesgos'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Rol, TipoRecurso,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso,
 } from '../domain/types'
 
 export interface UI {
@@ -87,6 +88,10 @@ export interface Acciones {
   registrarRecepcion: (r: Omit<RecepcionObra, 'id' | 'registradaPor'>) => string | null
   /** Subsanación (R02) o V°B° del mandante (R11) a una observación de la recepción. */
   observacionRecepcion: (recepcionId: string, observacionId: string, accion: 'subsanar' | 'visto_bueno') => void
+  /** Identifica un riesgo (con responsable queda en análisis); devuelve su id o el motivo del error. */
+  crearRiesgo: (r: Pick<Riesgo, 'obraId' | 'titulo' | 'causa' | 'categoria' | 'partidaIds' | 'responsable'>) => { id?: string; error?: string }
+  /** Transición del riesgo (10 §25); devuelve el motivo si no se pudo. */
+  accionRiesgo: (id: string, accion: AccionRiesgo, datos?: Omit<DatosAccionRiesgo, 'fecha' | 'autor'>) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -388,6 +393,36 @@ export const useStore = create<Estado>()(
             const r = recepciones.find((x) => x.id === recepcionId)!
             return { recepciones, obras: s.obras.map((o) => (o.id === r.obraId ? { ...o, estado: estadoObraPorRecepcion(recepciones, o.id, Infinity, o.estado) } : o)) }
           }),
+        crearRiesgo: (r) => {
+          const s = getS()
+          if (!puedeCrearRiesgo(s.ui.rol)) return { error: 'Tu rol no puede registrar riesgos.' }
+          if (!r.titulo.trim() || !r.causa.trim()) return { error: 'Indica el riesgo y su causa.' }
+          const t = hoy()
+          const id = uid('rs')
+          const numero = Math.max(0, ...s.riesgos.filter((x) => x.obraId === r.obraId).map((x) => x.numero)) + 1
+          const responsable = r.responsable?.trim() || undefined
+          const nuevo: Riesgo = {
+            ...r, id, numero, titulo: r.titulo.trim(), causa: r.causa.trim(), responsable, origen: 'manual', evaluaciones: [], plan: [],
+            historial: [{ fecha: t, estado: 'identificado', por: s.ui.usuario }, ...(responsable ? [{ fecha: t, estado: 'en_analisis' as const, por: s.ui.usuario }] : [])],
+            creado: t, creadoPor: s.ui.usuario,
+          }
+          mutar((x) => ({ riesgos: [...x.riesgos, nuevo] }))
+          return { id }
+        },
+        accionRiesgo: (id, accion, datos = {}) => {
+          const s = getS()
+          const r = s.riesgos.find((x) => x.id === id)
+          if (!r) return 'El riesgo no existe.'
+          const t = hoy()
+          if (!accionesRiesgo(r, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            const nuevo = aplicarAccionRiesgo(r, accion, { ...datos, fecha: t, autor: s.ui.usuario })
+            mutar((x) => ({ riesgos: x.riesgos.map((y) => (y.id === id ? nuevo : y)) }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -395,7 +430,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 8,
+      version: 9,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

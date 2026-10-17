@@ -20,7 +20,7 @@ export const TABLA: Record<Coleccion, string> = {
   obras: 'obras', partidas: 'partidas', programas: 'programas', cuadrillas: 'cuadrillas', rdos: 'rdos', costos: 'costos',
   compromisos: 'compromisos', reglasMapeo: 'reglas_mapeo', ajustes: 'ajustes', periodos: 'periodos', alertas: 'alertas',
   estadosPago: 'estados_pago', ordenesCambio: 'ordenes_cambio', obligaciones: 'obligaciones', garantias: 'garantias',
-  recepciones: 'recepciones',
+  recepciones: 'recepciones', riesgos: 'riesgos',
 }
 
 export type EstadoSync = 'inactivo' | 'sincronizando' | 'al_dia' | 'pendiente' | 'sin_conexion' | 'error'
