@@ -15,7 +15,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria,
 } from './types'
 
 function rng(seed: number) {
@@ -827,6 +827,96 @@ function cumplimientoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'trabajadores' | '
 }
 
 /**
+ * Maquinaria de la demo: los equipos del presupuesto (bomba de hormigón, excavadoras, placa, demoledor),
+ * con partes diarios de las últimas 8 semanas por las horas que corresponden al avance de los RDO, y una
+ * grúa torre propia de costo fijo (utilización cercana al 78 %) con mantención quincenal.
+ */
+function maquinariaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'equipos' | 'partesMaquinaria'> {
+  const H = hoyDia
+  const equipos: Equipo[] = []
+  const partes: ParteMaquinaria[] = []
+  const desde = H - 56
+  const diasPartida = (obraId: string, pids: string[]) => {
+    const m = new Map<Dia, Map<string, number>>()
+    for (const r of d.rdos) {
+      if (r.obraId !== obraId || r.estado === 'rechazado') continue
+      for (const a of r.avances) {
+        if (!pids.includes(a.partidaId) || a.cantidad <= 0) continue
+        const dia = m.get(r.fecha) ?? new Map<string, number>()
+        dia.set(a.partidaId, (dia.get(a.partidaId) ?? 0) + a.cantidad)
+        m.set(r.fecha, dia)
+      }
+    }
+    return m
+  }
+  const historial = (fecha: Dia, operador: string, jefe: string) =>
+    [{ fecha, estado: 'enviado' as const, por: operador }, ...(fecha + 1 <= H - 1 ? [{ fecha: fecha + 1, estado: 'validado' as const, por: jefe }] : [])]
+  // Equipos del presupuesto: horas = avance × horas de equipo por unidad
+  const delPresupuesto: [string, string, string, string, Equipo['propiedad'], number, number][] = [
+    ['obra_aromos', '3.2', 'EQ-02', 'Bomba de hormigón estacionaria', 'arrendado', 60_000, 9],
+    ['obra_aromos', '2.1', 'EQ-03', 'Excavadora CAT 320', 'arrendado', 48_000, 16],
+    ['obra_aromos', '2.2', 'EQ-04', 'Placa compactadora', 'arrendado', 40_000, 2],
+    ['obra_clinica', '1.1', 'EQ-11', 'Demoledor eléctrico', 'arrendado', 15_000, 0],
+    ['obra_bodegas', '2.1', 'EQ-21', 'Excavadora CAT 320', 'arrendado', 45_000, 16],
+  ]
+  for (const [obraId, cod, codigo, nombre, propiedad, tarifa, consumo] of delPresupuesto) {
+    const obra = d.obras.find((o) => o.id === obraId)!
+    const p = d.partidas.find((x) => x.id === `${obraId}_p${cod}`)!
+    const cpu = p.recursos.find((r) => r.tipo === 'EQ')!.cantPorUnidad
+    const dias = diasPartida(obraId, [p.id])
+    const fechas = [...dias.keys()].sort((a, b) => a - b)
+    if (!fechas.length) continue
+    const id = `eq_${obraId}_${codigo}`
+    const ultimo = fechas.at(-1)!
+    const enUso = ultimo >= H - 3 && obra.estado === 'en_ejecucion'
+    equipos.push({
+      id, codigo, nombre, tipo: nombre.split(' ')[0], propiedad, tarifa: { modalidad: 'hora', monto: tarifa }, costoHoraPresupuesto: p.recursos.find((r) => r.tipo === 'EQ')!.precio,
+      consumoEstandar: consumo || undefined, obraId, asignado: fechas[0] - 1, liberado: enUso ? undefined : ultimo + 1, mantenciones: [],
+    })
+    let horometro = 1200 + codigo.length * 37
+    for (const f of fechas.filter((x) => x > desde && x <= H - 1)) {
+      const horas = Math.max(0.5, Math.round(dias.get(f)!.get(p.id)! * cpu * 10) / 10)
+      partes.push({
+        id: `pm_${id}_${f}`, obraId, equipoId: id, fecha: f, operador: `Operador ${codigo}`, horometroInicial: horometro, horometroFinal: Math.round((horometro + horas) * 10) / 10,
+        horasDisponibles: horas, trabajos: [{ partidaId: p.id, horas }], improductivas: [], horasMantencion: 0,
+        combustible: Math.round(horas * consumo * (1 + ((f % 5) - 2) / 50) * 10) / 10, historial: historial(f, obra.jefeTerreno, obra.jefeTerreno), creado: f, creadoPor: obra.jefeTerreno,
+      })
+      horometro = Math.round((horometro + horas) * 10) / 10
+    }
+  }
+  // Grúa torre propia del edificio: costo fijo mensual, 9 h disponibles por día de obra gruesa
+  const aromos = d.obras.find((o) => o.id === 'obra_aromos')!
+  const estructura = ['3.2', '3.3', '3.4'].map((c) => `obra_aromos_p${c}`)
+  const diasGrua = diasPartida('obra_aromos', estructura)
+  const fechasGrua = [...diasGrua.keys()].sort((a, b) => a - b)
+  if (fechasGrua.length) {
+    const id = 'eq_obra_aromos_EQ-01'
+    const asignado = fechasGrua[0] - 3
+    const mantenciones: Equipo['mantenciones'] = []
+    for (let m = asignado + 14, k = 1; m <= H + 14; m += 14, k++) mantenciones.push({ id: `mt${k}`, descripcion: 'Mantención preventiva quincenal (frenos, cables y lubricación)', programada: m, ...(m <= H - 1 ? { realizada: m } : {}) })
+    equipos.push({
+      id, codigo: 'EQ-01', nombre: 'Grúa torre Liebherr 132 EC-H', tipo: 'Grúa', propiedad: 'propio', tarifa: { modalidad: 'mes', monto: 4_400_000 }, costoHoraPresupuesto: 28_000,
+      obraId: 'obra_aromos', asignado, mantenciones,
+    })
+    let horometro = 8450
+    fechasGrua.filter((x) => x > desde && x <= H - 1).forEach((f, k) => {
+      const mant = mantenciones.some((m) => m.programada === f) ? 2 : 0
+      const espera = k % 3 === 2 ? 1 : 0
+      const trab = Math.round((7 - mant * 0.8 - espera * 0.5 + ((f % 3) - 1) * 0.3) * 10) / 10
+      const reparto = estructura.filter((pid) => diasGrua.get(f)!.has(pid))
+      partes.push({
+        id: `pm_${id}_${f}`, obraId: 'obra_aromos', equipoId: id, fecha: f, operador: 'Ramón Fuentes', horometroInicial: horometro, horometroFinal: Math.round((horometro + trab) * 10) / 10,
+        horasDisponibles: 9 - mant, trabajos: reparto.map((pid) => ({ partidaId: pid, horas: Math.round((trab / reparto.length) * 10) / 10 })),
+        improductivas: espera ? [{ horas: espera, causa: 'espera_frente' as const }] : [], horasMantencion: mant, combustible: 0,
+        historial: historial(f, 'Ramón Fuentes', aromos.jefeTerreno), creado: f, creadoPor: aromos.jefeTerreno,
+      })
+      horometro = Math.round((horometro + trab) * 10) / 10
+    })
+  }
+  return { equipos, partesMaquinaria: partes }
+}
+
+/**
  * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
  * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
  */
@@ -1355,7 +1445,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 12
+export const VERSION_DEMO = 13
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1374,7 +1464,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1421,6 +1511,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, subcontratosDemo(d, hoyDia))
   // Cumplimiento laboral: trabajadores, F30 y F30-1 de cada subcontratista
   Object.assign(d, cumplimientoDemo(d, hoyDia))
+  // Maquinaria: equipos y partes diarios de las últimas 8 semanas
+  Object.assign(d, maquinariaDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

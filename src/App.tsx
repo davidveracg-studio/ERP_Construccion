@@ -23,6 +23,7 @@ import Compras, { DetalleOC as DetalleOrdenCompra } from './pages/Compras'
 import Bodega from './pages/Bodega'
 import Subcontratos, { DetalleSubcontrato } from './pages/Subcontratos'
 import PortalSubcontratista from './pages/Cumplimiento'
+import Maquinaria, { DetalleEquipo } from './pages/Maquinaria'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -112,6 +113,8 @@ function Rutas() {
               <Route path="bodega" element={<Bodega />} />
               <Route path="subcontratos" element={<Subcontratos />} />
               <Route path="subcontratos/:id" element={<DetalleSubcontrato />} />
+              <Route path="maquinaria" element={<Maquinaria />} />
+              <Route path="maquinaria/:id" element={<DetalleEquipo />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />

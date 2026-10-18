@@ -1,6 +1,6 @@
 import type {
   AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Garantia, Obligacion, Obra, OrdenCambio, Partida,
-  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral,
+  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria,
 } from './types'
 
 /** Conjunto completo de datos de una empresa (lo que persiste el store). */
@@ -37,6 +37,8 @@ export interface Datos {
   epsSubcontrato: EPSubcontrato[]
   trabajadores: Trabajador[]
   documentosLaborales: DocumentoLaboral[]
+  equipos: Equipo[]
+  partesMaquinaria: ParteMaquinaria[]
 }
 
 export const CONFIG_DEFECTO: Config = {
@@ -74,13 +76,13 @@ export function programaDe(d: Datos, obraId: string, tipo: Programa['tipo']): Pr
 export const COLECCIONES = [
   'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago', 'ordenesCambio', 'obligaciones', 'garantias', 'recepciones', 'riesgos',
   'documentos', 'rfis', 'submittals', 'folios', 'tareasSemanales',
-  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales',
+  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales', 'equipos', 'partesMaquinaria',
 ] as const
 export type Coleccion = (typeof COLECCIONES)[number]
 
 export function datosVacios(): Datos {
   return {
     config: CONFIG_DEFECTO, obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [],
   }
 }

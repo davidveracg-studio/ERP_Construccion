@@ -586,6 +586,55 @@ export interface DocumentoLaboral {
   creadoPor: string
 }
 
+export type CausaImproductiva = 'espera_frente' | 'falta_operador' | 'clima' | 'combustible' | 'otra'
+
+/** Mantención programada de un equipo (KMQ-06). */
+export interface Mantencion {
+  id: string
+  descripcion: string
+  programada: Dia
+  realizada?: Dia
+}
+
+/** Equipo o maquinaria (08 Equipo): propio, arrendado o de subcontratista, con su tarifa. */
+export interface Equipo {
+  id: string
+  codigo: string
+  nombre: string
+  tipo: string
+  propiedad: 'propio' | 'arrendado' | 'subcontratista'
+  proveedorId?: string
+  /** Tarifa: por hora trabajada, o costo fijo por día o mes (RULE-205 aplica a los de costo fijo). */
+  tarifa: { modalidad: 'hora' | 'dia' | 'mes'; monto: number }
+  /** Costo hora del presupuesto (KMQ-03). */
+  costoHoraPresupuesto?: number
+  /** Consumo estándar de combustible en l/h (KMQ-04). */
+  consumoEstandar?: number
+  obraId?: string
+  asignado: Dia
+  liberado?: Dia
+  mantenciones: Mantencion[]
+}
+
+/** Parte diario de maquinaria (08, 10 §29): horas trabajadas por partida, improductivas con causa, mantención y combustible. */
+export interface ParteMaquinaria {
+  id: string
+  obraId: string
+  equipoId: string
+  fecha: Dia
+  operador: string
+  horometroInicial: number
+  horometroFinal: number
+  horasDisponibles: number
+  trabajos: { partidaId: string; horas: number }[]
+  improductivas: { horas: number; causa: CausaImproductiva }[]
+  horasMantencion: number
+  combustible: number
+  historial: PasoDoc<'enviado' | 'validado' | 'corregido'>[]
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -808,7 +857,7 @@ export interface RDO {
   validadoPor?: string
 }
 
-export type OrigenCosto = 'importacion' | 'manual' | 'recepcion' | 'ep_subcontrato'
+export type OrigenCosto = 'importacion' | 'manual' | 'recepcion' | 'ep_subcontrato' | 'parte_maquinaria'
 
 export interface CostoReal {
   id: string

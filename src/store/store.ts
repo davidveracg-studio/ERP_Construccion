@@ -31,11 +31,12 @@ import {
   sugerirLineas, type AccionEPSub, type AccionSub,
 } from '../domain/subcontratos'
 import { acreditacion, f301Vigente, puedeCargarDocumentos, puedeRevisarDocumentos, subcontratistaDeR10 } from '../domain/cumplimiento'
+import { accionesParte, costoParte, erroresParte, estadoParte, puedeEditarEquipos, puedeRegistrarParte, type AccionParte } from '../domain/maquinaria'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria,
 } from '../domain/types'
 
 export interface UI {
@@ -163,6 +164,13 @@ export interface Acciones {
   /** Carga (o recarga) un documento laboral: queda por revisar. */
   cargarDocumento: (x: Pick<DocumentoLaboral, 'obraId' | 'subcontratistaId' | 'trabajadorId' | 'tipo' | 'periodo' | 'vencimiento' | 'archivo'>) => string | null
   revisarDocumento: (id: string, resultado: 'validado' | 'rechazado', motivo?: string) => string | null
+  guardarEquipo: (e: Omit<Equipo, 'id' | 'mantenciones'> & { id?: string }) => string | null
+  programarMantencion: (equipoId: string, descripcion: string, programada: number) => string | null
+  realizarMantencion: (equipoId: string, mantencionId: string) => string | null
+  /** Parte diario: queda enviado para validación de terreno. */
+  registrarParte: (p: Omit<ParteMaquinaria, 'id' | 'historial' | 'creado' | 'creadoPor'>) => string | null
+  /** Validar (genera el costo real de equipo por partida) o devolver para corregir. */
+  accionParte: (id: string, accion: AccionParte, texto?: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -934,6 +942,57 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ documentosLaborales: x.documentosLaborales.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: resultado, por: s.ui.usuario, ...(motivo?.trim() ? { texto: motivo.trim() } : {}) }] } : y)) }))
           return null
         },
+        guardarEquipo: (e) => {
+          const s = getS()
+          if (!puedeEditarEquipos(s.ui.rol)) return 'Los equipos los administra Bodega y Adquisiciones.'
+          if (!e.codigo.trim() || !e.nombre.trim()) return 'Indica código y nombre.'
+          if (!(e.tarifa.monto > 0)) return 'Indica la tarifa.'
+          if (e.id) mutar((x) => ({ equipos: x.equipos.map((y) => (y.id === e.id ? { ...y, ...e, id: y.id } : y)) }))
+          else mutar((x) => ({ equipos: [...x.equipos, { ...e, id: uid('eq'), mantenciones: [] }] }))
+          return null
+        },
+        programarMantencion: (equipoId, descripcion, programada) => {
+          const s = getS()
+          if (!puedeEditarEquipos(s.ui.rol) && s.ui.rol !== 'R03') return 'Programan mantenciones Bodega o el jefe de terreno.'
+          if (!descripcion.trim()) return 'Indica la mantención.'
+          mutar((x) => ({ equipos: x.equipos.map((y) => (y.id === equipoId ? { ...y, mantenciones: [...y.mantenciones, { id: uid('mt'), descripcion: descripcion.trim(), programada }] } : y)) }))
+          return null
+        },
+        realizarMantencion: (equipoId, mantencionId) => {
+          const s = getS()
+          if (!puedeEditarEquipos(s.ui.rol) && s.ui.rol !== 'R03') return 'Registran mantenciones Bodega o el jefe de terreno.'
+          const t = hoy()
+          mutar((x) => ({ equipos: x.equipos.map((y) => (y.id !== equipoId ? y : { ...y, mantenciones: y.mantenciones.map((m) => (m.id === mantencionId ? { ...m, realizada: t } : m)) })) }))
+          return null
+        },
+        registrarParte: (p) => {
+          const s = getS()
+          if (!puedeRegistrarParte(s.ui.rol)) return 'Registran partes el jefe de terreno o el capataz.'
+          const err = erroresParte(p)
+          if (err) return err
+          if (p.trabajos.some((x) => x.horas > 0 && !x.partidaId)) return 'Imputa las horas trabajadas a una partida.'
+          if (s.partesMaquinaria.some((x) => x.equipoId === p.equipoId && x.fecha === p.fecha)) return 'Ya hay un parte de ese equipo en esa fecha.'
+          const t = hoy()
+          mutar((x) => ({ partesMaquinaria: [...x.partesMaquinaria, { ...p, id: uid('pm'), historial: [{ fecha: t, estado: 'enviado' as const, por: s.ui.usuario }], creado: t, creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        accionParte: (id, accion, texto) => {
+          const s = getS()
+          const p = s.partesMaquinaria.find((x) => x.id === id)
+          const eq = p && s.equipos.find((e) => e.id === p.equipoId)
+          if (!p || !eq) return 'El parte no existe.'
+          const t = hoy()
+          if (!accionesParte(p, t, s.ui.rol).includes(accion)) return 'Valida los partes el jefe de terreno.'
+          if (accion === 'corregir' && !texto?.trim()) return 'Indica qué hay que corregir.'
+          if (accion === 'validar' && estadoParte(p, t) === 'corregido') return 'El parte está devuelto para corrección.'
+          const paso = { fecha: t, estado: accion === 'validar' ? 'validado' as const : 'corregido' as const, por: s.ui.usuario, ...(texto?.trim() ? { texto: texto.trim() } : {}) }
+          const costos = accion !== 'validar' ? [] : costoParte(p, eq).map((x) => ({
+            id: uid('co'), obraId: p.obraId, fecha: p.fecha, partidaId: x.partidaId, tipo: 'EQ' as const, cantidad: x.horas, precio: Math.round(x.monto / x.horas),
+            monto: x.monto, descripcion: `${eq.nombre} (${eq.codigo})`, documento: `Parte ${eq.codigo} ${p.fecha}`, origen: 'parte_maquinaria' as const,
+          }))
+          mutar((x) => ({ partesMaquinaria: x.partesMaquinaria.map((y) => (y.id === id ? { ...y, historial: [...y.historial, paso] } : y)), costos: [...x.costos, ...costos] }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -941,7 +1000,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 15,
+      version: 16,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
