@@ -32,11 +32,12 @@ import {
 } from '../domain/subcontratos'
 import { acreditacion, f301Vigente, puedeCargarDocumentos, puedeRevisarDocumentos, subcontratistaDeR10 } from '../domain/cumplimiento'
 import { accionesParte, costoParte, erroresParte, estadoParte, puedeEditarEquipos, puedeRegistrarParte, type AccionParte } from '../domain/maquinaria'
+import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion,
 } from '../domain/types'
 
 export interface UI {
@@ -52,6 +53,7 @@ export const USUARIOS: Record<Rol, string> = {
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
   R07: 'Patricia Lagos',
+  R09: 'Lorena Castro',
   R10: 'Sergio Pizarro (Eléctrica Norte)',
   R11: 'ITO del mandante',
 }
@@ -171,6 +173,16 @@ export interface Acciones {
   registrarParte: (p: Omit<ParteMaquinaria, 'id' | 'historial' | 'creado' | 'creadoPor'>) => string | null
   /** Validar (genera el costo real de equipo por partida) o devolver para corregir. */
   accionParte: (id: string, accion: AccionParte, texto?: string) => string | null
+  abrirCajaChica: (c: Pick<CajaChica, 'obraId' | 'responsable' | 'fondo'>) => string | null
+  cerrarCajaChica: (id: string) => string | null
+  /** Rendición nueva en preparación (una a la vez por caja). */
+  crearRendicion: (cajaId: string) => string | null
+  agregarItemRendicion: (rendicionId: string, item: Omit<ItemRendicion, 'id' | 'revision'>) => string | null
+  quitarItemRendicion: (rendicionId: string, itemId: string) => void
+  presentarRendicion: (id: string) => string | null
+  revisarItemRendicion: (rendicionId: string, itemId: string, estado: 'aprobado' | 'rechazado', motivo?: string) => string | null
+  /** Finanzas repone el fondo por lo aprobado: es costo real de las partidas o de GG. */
+  reponerFondo: (id: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -993,6 +1005,84 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ partesMaquinaria: x.partesMaquinaria.map((y) => (y.id === id ? { ...y, historial: [...y.historial, paso] } : y)), costos: [...x.costos, ...costos] }))
           return null
         },
+        abrirCajaChica: (c) => {
+          const s = getS()
+          if (!puedeAdministrarCaja(s.ui.rol)) return 'La caja chica la abre Finanzas.'
+          if (!(c.fondo > 0) || !c.responsable.trim()) return 'Indica fondo y responsable.'
+          const t = hoy()
+          if (s.cajasChicas.some((x) => x.obraId === c.obraId && abiertaCaja(x, t))) return 'La obra ya tiene una caja chica abierta.'
+          mutar((x) => ({ cajasChicas: [...x.cajasChicas, { ...c, id: uid('cc'), responsable: c.responsable.trim(), abierta: t }] }))
+          return null
+        },
+        cerrarCajaChica: (id) => {
+          const s = getS()
+          const caja = s.cajasChicas.find((x) => x.id === id)
+          if (!caja) return 'La caja no existe.'
+          if (!puedeAdministrarCaja(s.ui.rol)) return 'La caja chica la cierra Finanzas.'
+          const t = hoy()
+          if (s.rendiciones.some((r) => r.cajaId === id && estadoRendicion(r, t) !== 'aprobada')) return 'Hay rendiciones pendientes: repón o rechaza antes de cerrar.'
+          mutar((x) => ({ cajasChicas: x.cajasChicas.map((y) => (y.id === id ? { ...y, cerrada: { fecha: t, devolucion: saldoCaja(caja, x.rendiciones, t).saldo } } : y)) }))
+          return null
+        },
+        crearRendicion: (cajaId) => {
+          const s = getS()
+          const caja = s.cajasChicas.find((x) => x.id === cajaId)
+          if (!caja) return 'La caja no existe.'
+          if (!puedeRendir(s.ui.rol)) return 'Rinde el responsable de la caja (administrador o jefe de terreno).'
+          const t = hoy()
+          if (s.rendiciones.some((r) => r.cajaId === cajaId && estadoRendicion(r, t) === 'borrador')) return 'Ya hay una rendición en preparación.'
+          const numero = Math.max(0, ...s.rendiciones.filter((r) => r.cajaId === cajaId).map((r) => r.numero)) + 1
+          mutar((x) => ({ rendiciones: [...x.rendiciones, { id: uid('rd'), obraId: caja.obraId, cajaId, numero, items: [], historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        agregarItemRendicion: (rendicionId, item) => {
+          const s = getS()
+          const r = s.rendiciones.find((x) => x.id === rendicionId)
+          if (!r || estadoRendicion(r, hoy()) !== 'borrador') return 'La rendición ya fue presentada.'
+          if (!puedeRendir(s.ui.rol)) return 'Rinde el responsable de la caja.'
+          if (!(item.monto > 0) || !item.descripcion.trim()) return 'Indica descripción y monto.'
+          mutar((x) => ({ rendiciones: x.rendiciones.map((y) => (y.id === rendicionId ? { ...y, items: [...y.items, { ...item, id: uid('it'), descripcion: item.descripcion.trim(), proveedor: item.proveedor.trim() }] } : y)) }))
+          return null
+        },
+        quitarItemRendicion: (rendicionId, itemId) =>
+          mutar((s) => ({ rendiciones: s.rendiciones.map((y) => (y.id === rendicionId && estadoRendicion(y, hoy()) === 'borrador' ? { ...y, items: y.items.filter((i) => i.id !== itemId) } : y)) })),
+        presentarRendicion: (id) => {
+          const s = getS()
+          const r = s.rendiciones.find((x) => x.id === id)
+          if (!r || estadoRendicion(r, hoy()) !== 'borrador') return 'La rendición no está en preparación.'
+          if (!puedeRendir(s.ui.rol)) return 'Presenta el responsable de la caja.'
+          if (!r.items.length) return 'Agrega al menos un gasto.'
+          const t = hoy()
+          mutar((x) => ({ rendiciones: x.rendiciones.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'presentada' as const, por: s.ui.usuario }] } : y)) }))
+          return null
+        },
+        revisarItemRendicion: (rendicionId, itemId, estado, motivo) => {
+          const s = getS()
+          const r = s.rendiciones.find((x) => x.id === rendicionId)
+          const item = r?.items.find((i) => i.id === itemId)
+          if (!r || !item || estadoRendicion(r, hoy()) !== 'presentada') return 'La rendición no está presentada.'
+          if (!puedeRevisarItem(s.ui.rol, item, s.config)) return 'Sobre 10 UF por ítem lo aprueba Finanzas o Gerencia (RN-P04).'
+          if (estado === 'rechazado' && !motivo?.trim()) return 'Indica el motivo del rechazo.'
+          const t = hoy()
+          mutar((x) => ({
+            rendiciones: x.rendiciones.map((y) => (y.id !== rendicionId ? y : { ...y, items: y.items.map((i) => (i.id === itemId ? { ...i, revision: { estado, fecha: t, por: s.ui.usuario, ...(motivo?.trim() ? { motivo: motivo.trim() } : {}) } } : i)) })),
+          }))
+          return null
+        },
+        reponerFondo: (id) => {
+          const s = getS()
+          const r = s.rendiciones.find((x) => x.id === id)
+          if (!r || estadoRendicion(r, hoy()) !== 'presentada') return 'La rendición no está presentada.'
+          if (!puedeAdministrarCaja(s.ui.rol)) return 'Repone el fondo Finanzas.'
+          if (r.items.some((i) => !i.revision)) return 'Revisa todos los ítems antes de reponer.'
+          const t = hoy()
+          const costos = r.items.filter((i) => i.revision?.estado === 'aprobado').map((i) => ({
+            id: uid('co'), obraId: r.obraId, fecha: i.fecha, partidaId: i.imputacion === 'GG' ? null : i.imputacion, tipo: i.imputacion === 'GG' ? 'GG' as const : 'OTRO' as const,
+            monto: i.monto, descripcion: i.descripcion, proveedor: i.proveedor || undefined, documento: `${i.comprobante === 'factura' ? 'Factura' : 'Boleta'} ${i.numero ?? ''} · rendición ${r.numero}`.trim(), origen: 'rendicion' as const,
+          }))
+          mutar((x) => ({ rendiciones: x.rendiciones.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'aprobada' as const, por: s.ui.usuario }] } : y)), costos: [...x.costos, ...costos] }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1000,7 +1090,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 16,
+      version: 17,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
