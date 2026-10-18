@@ -392,6 +392,9 @@ export interface Proveedor {
   /** RULE-302: inactivo o bloqueado no puede recibir órdenes de compra. */
   estado: 'activo' | 'inactivo' | 'bloqueado'
   motivoBloqueo?: string
+  /** También ejecuta partidas como subcontratista (08 Subcontratista). */
+  esSubcontratista?: boolean
+  especialidad?: string
 }
 
 /** Material del catálogo de la empresa (08 Material). */
@@ -491,6 +494,64 @@ export interface MovimientoStock {
   obraDestinoId?: string
   motivo?: string
   autor: string
+}
+
+export type EstadoSubcontrato = 'borrador' | 'en_acreditacion' | 'vigente' | 'suspendido' | 'terminado' | 'cerrado' | 'resuelto'
+export type EstadoEPSub = 'borrador' | 'presentado' | 'validado' | 'aprobado' | 'bloqueado' | 'pagado' | 'rechazado'
+
+/** Partida asignada al subcontrato, con cantidad y precio unitario del subcontrato. */
+export interface LineaSubcontrato {
+  partidaId: string
+  cantidad: number
+  pu: number
+}
+
+/** Adicional, descuento o multa del subcontrato (KSU-07/08). */
+export interface AjusteSubcontrato {
+  id: string
+  tipo: 'adicional' | 'descuento' | 'multa'
+  fecha: Dia
+  monto: number
+  descripcion: string
+}
+
+/** Subcontrato (08, 10 §14): contrato → presupuesto → avance → EP → retenciones → pago. */
+export interface Subcontrato {
+  id: string
+  obraId: string
+  numero: number
+  /** Documento del contrato (SC-003…); es el del compromiso que lo respalda. */
+  codigo: string
+  subcontratistaId: string
+  descripcion: string
+  lineas: LineaSubcontrato[]
+  /** Retención de cada EP (fracción); se devuelve al cerrar (RULE-704). */
+  retencion: number
+  inicio: Dia
+  termino: Dia
+  ajustes: AjusteSubcontrato[]
+  historial: PasoDoc<EstadoSubcontrato>[]
+  /** Compromiso de cada partida (partidaId → compromiso): su saldo es compromiso en el control de costos. */
+  compromisos: Record<string, string>
+  /** Devolución de la retención acumulada (al cierre). */
+  retencionDevuelta?: Dia
+  creado: Dia
+  creadoPor: string
+}
+
+/** Estado de pago de un subcontrato (08, 10 §15): cantidades del período por partida. */
+export interface EPSubcontrato {
+  id: string
+  obraId: string
+  subcontratoId: string
+  numero: number
+  fechaCorte: Dia
+  lineas: { partidaId: string; cantidad: number }[]
+  /** Multas y descuentos que se aplican en este EP. */
+  descuentos: number
+  historial: PasoDoc<EstadoEPSub>[]
+  creado: Dia
+  creadoPor: string
 }
 
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
@@ -715,7 +776,7 @@ export interface RDO {
   validadoPor?: string
 }
 
-export type OrigenCosto = 'importacion' | 'manual' | 'recepcion'
+export type OrigenCosto = 'importacion' | 'manual' | 'recepcion' | 'ep_subcontrato'
 
 export interface CostoReal {
   id: string
@@ -882,6 +943,8 @@ export interface Config {
     limiteOcUf?: number
     /** RULE-303: sobre este monto en UF se exigen 3 cotizaciones o una justificación. */
     cotizacionesUf?: number
+    /** RN-P04: el administrador de obra firma subcontratos hasta este monto en UF; sobre él, Gerencia. */
+    limiteSubcontratoUf?: number
   }
   /** Valor de la UF en pesos para los umbrales expresados en UF. */
   valorUF?: number

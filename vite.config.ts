@@ -9,5 +9,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Los tests de la demo la regeneran día a día durante dos semanas; en paralelo superan los 5 s por defecto
+    testTimeout: 20_000,
   },
 })

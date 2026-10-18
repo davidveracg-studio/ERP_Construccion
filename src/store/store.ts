@@ -26,11 +26,15 @@ import {
   puedeEditarProveedores, puedeRechazarSolicitud, puedeRecibir, puedeSolicitar, registrarRecepcion, type AccionOC as AccionCompra,
 } from '../domain/compras'
 import { puedeMoverStock, stockMaterial, validarSalida } from '../domain/bodega'
+import {
+  accionesEPSub, accionesSub, aplicarAccionEPSub, aplicarAccionSub, estadoEPSub, estadoSub, puPartida, puedeCrearSubcontrato, puedeEditarSubcontratistas,
+  sugerirLineas, type AccionEPSub, type AccionSub,
+} from '../domain/subcontratos'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato,
 } from '../domain/types'
 
 export interface UI {
@@ -143,6 +147,16 @@ export interface Acciones {
   registrarMovimiento: (m: { obraId: string; materialId: string; tipo: Exclude<TipoMovimiento, 'entrada'>; cantidad: number; partidaId?: string; obraDestinoId?: string; motivo?: string }) => string | null
   /** Atiende una solicitud de terreno con stock de la bodega de obra. */
   despacharSolicitud: (id: string) => string | null
+  guardarSubcontratista: (p: Omit<Proveedor, 'id' | 'estado' | 'esSubcontratista'> & { id?: string }) => string | null
+  crearSubcontrato: (sc: Pick<Subcontrato, 'obraId' | 'subcontratistaId' | 'descripcion' | 'lineas' | 'retencion' | 'inicio' | 'termino'>) => { id?: string; error?: string }
+  editarSubcontrato: (id: string, cambios: Partial<Pick<Subcontrato, 'descripcion' | 'lineas' | 'retencion' | 'inicio' | 'termino'>>) => void
+  accionSubcontrato: (id: string, accion: AccionSub, texto?: string) => string | null
+  /** Adicional, descuento o multa; los adicionales y descuentos ajustan el compromiso. */
+  registrarAjusteSub: (id: string, a: Omit<AjusteSubcontrato, 'id' | 'fecha'>) => string | null
+  /** EP del período con las cantidades sugeridas (avance validado − cobrado). */
+  crearEPSub: (subcontratoId: string, fechaCorte: number) => { id?: string; error?: string }
+  editarEPSub: (id: string, cambios: Partial<Pick<EPSubcontrato, 'lineas' | 'descuentos'>>) => void
+  accionEPSub: (id: string, accion: AccionEPSub, texto?: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -767,6 +781,118 @@ export const useStore = create<Estado>()(
           }))
           return null
         },
+        guardarSubcontratista: (p) => {
+          const s = getS()
+          if (!puedeEditarSubcontratistas(s.ui.rol)) return 'Los subcontratistas los registran Gerencia o el administrador de obra.'
+          if (!p.nombre.trim() || !p.rut.trim()) return 'Indica nombre y RUT.'
+          const existente = s.proveedores.find((x) => x.id === p.id || x.rut.replace(/\W/g, '') === p.rut.replace(/\W/g, ''))
+          if (existente) {
+            mutar((x) => ({ proveedores: x.proveedores.map((y) => (y.id === existente.id ? { ...y, ...p, id: existente.id, esSubcontratista: true } : y)) }))
+          } else {
+            mutar((x) => ({ proveedores: [...x.proveedores, { ...p, id: uid('prov'), estado: 'activo', esSubcontratista: true }] }))
+          }
+          return null
+        },
+        crearSubcontrato: (sc) => {
+          const s = getS()
+          if (!puedeCrearSubcontrato(s.ui.rol)) return { error: 'Tu rol no puede crear subcontratos.' }
+          if (!sc.subcontratistaId) return { error: 'Elige el subcontratista.' }
+          if (sc.lineas.length === 0) return { error: 'Asigna al menos una partida.' }
+          const t = hoy()
+          const id = uid('sc')
+          const propios = s.subcontratos.filter((x) => x.obraId === sc.obraId)
+          const numero = Math.max(0, ...propios.map((x) => x.numero)) + 1
+          const codigo = `SC-${String(900 + numero).padStart(3, '0')}`
+          mutar((x) => ({ subcontratos: [...x.subcontratos, { ...sc, id, numero, codigo, ajustes: [], historial: [], compromisos: {}, creado: t, creadoPor: s.ui.usuario }] }))
+          return { id }
+        },
+        editarSubcontrato: (id, cambios) =>
+          mutar((s) => ({ subcontratos: s.subcontratos.map((x) => (x.id === id && estadoSub(x, hoy()) === 'borrador' ? { ...x, ...cambios } : x)) })),
+        accionSubcontrato: (id, accion, texto) => {
+          const s = getS()
+          const sc = s.subcontratos.find((x) => x.id === id)
+          if (!sc) return 'El subcontrato no existe.'
+          const t = hoy()
+          if (!accionesSub(sc, t, s.ui.rol, s.config).includes(accion))
+            return accion === 'firmar' && s.ui.rol === 'R02' ? 'Supera el límite de 500 UF del administrador de obra: lo firma Gerencia (R01).' : 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            let nuevo = aplicarAccionSub(sc, accion, { fecha: t, autor: s.ui.usuario, texto, eps: s.epsSubcontrato, rdos: s.rdos })
+            // Al firmar, el saldo de cada partida queda comprometido (si no venía de un compromiso importado)
+            const nuevosComp: Compromiso[] = []
+            if (accion === 'firmar') {
+              const prov = s.proveedores.find((p) => p.id === sc.subcontratistaId)
+              const mapa = { ...sc.compromisos }
+              for (const l of sc.lineas) {
+                if (mapa[l.partidaId]) continue
+                const k: Compromiso = {
+                  id: `${sc.id}_${l.partidaId}`, obraId: sc.obraId, partidaId: l.partidaId, tipo: 'SUB', descripcion: `Subcontrato ${sc.descripcion}`,
+                  proveedor: prov?.nombre, documento: sc.codigo, monto: Math.round(l.cantidad * l.pu), fecha: t,
+                }
+                nuevosComp.push(k)
+                mapa[l.partidaId] = k.id
+              }
+              nuevo = { ...nuevo, compromisos: mapa }
+            }
+            mutar((x) => ({ subcontratos: x.subcontratos.map((y) => (y.id === id ? nuevo : y)), compromisos: [...x.compromisos, ...nuevosComp] }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
+        registrarAjusteSub: (id, a) => {
+          const s = getS()
+          const sc = s.subcontratos.find((x) => x.id === id)
+          if (!sc) return 'El subcontrato no existe.'
+          if (s.ui.rol !== 'R02' && s.ui.rol !== 'R01') return 'Los ajustes los registra el administrador de obra.'
+          if (!(a.monto > 0) || !a.descripcion.trim()) return 'Indica monto y descripción.'
+          const t = hoy()
+          // El adicional o descuento cambia el monto vigente: ajusta el compromiso de la primera partida
+          const kid = sc.compromisos[sc.lineas[0]?.partidaId]
+          const delta = a.tipo === 'adicional' ? a.monto : a.tipo === 'descuento' ? -a.monto : 0
+          mutar((x) => ({
+            subcontratos: x.subcontratos.map((y) => (y.id === id ? { ...y, ajustes: [...y.ajustes, { ...a, id: uid('aj'), fecha: t, descripcion: a.descripcion.trim() }] } : y)),
+            compromisos: delta && kid ? x.compromisos.map((k) => (k.id === kid ? { ...k, monto: k.monto + delta } : k)) : x.compromisos,
+          }))
+          return null
+        },
+        crearEPSub: (subcontratoId, fechaCorte) => {
+          const s = getS()
+          const sc = s.subcontratos.find((x) => x.id === subcontratoId)
+          if (!sc) return { error: 'El subcontrato no existe.' }
+          if (s.ui.rol !== 'R02') return { error: 'El EP lo prepara el administrador de obra (o el subcontratista desde su portal).' }
+          const t = hoy()
+          if (fechaCorte > t) return { error: 'El corte no puede ser futuro.' }
+          const lineas = sugerirLineas(sc, s.epsSubcontrato, s.rdos, fechaCorte, t)
+          if (lineas.length === 0) return { error: 'No hay avance validado por cobrar a esa fecha.' }
+          const id = uid('eps')
+          const numero = Math.max(0, ...s.epsSubcontrato.filter((e) => e.subcontratoId === subcontratoId).map((e) => e.numero)) + 1
+          mutar((x) => ({ epsSubcontrato: [...x.epsSubcontrato, { id, obraId: sc.obraId, subcontratoId, numero, fechaCorte, lineas, descuentos: 0, historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return { id }
+        },
+        editarEPSub: (id, cambios) =>
+          mutar((s) => ({ epsSubcontrato: s.epsSubcontrato.map((e) => (e.id === id && estadoEPSub(e, hoy()) === 'borrador' ? { ...e, ...cambios } : e)) })),
+        accionEPSub: (id, accion, texto) => {
+          const s = getS()
+          const ep = s.epsSubcontrato.find((x) => x.id === id)
+          const sc = ep && s.subcontratos.find((x) => x.id === ep.subcontratoId)
+          if (!ep || !sc) return 'El estado de pago no existe.'
+          const t = hoy()
+          if (!accionesEPSub(ep, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            const nuevo = aplicarAccionEPSub(ep, accion, { fecha: t, autor: s.ui.usuario, texto, eps: s.epsSubcontrato, rdos: s.rdos, sc })
+            // Al aprobarse, el EP es costo real de sus partidas (contra el compromiso del subcontrato)
+            const prov = s.proveedores.find((p) => p.id === sc.subcontratistaId)
+            const costos = accion !== 'aprobar' ? [] : ep.lineas.filter((l) => l.cantidad > 0).map((l) => ({
+              id: uid('co'), obraId: ep.obraId, fecha: t, partidaId: l.partidaId, tipo: 'SUB' as const, cantidad: l.cantidad, precio: puPartida(sc, l.partidaId),
+              monto: Math.round(l.cantidad * puPartida(sc, l.partidaId)), descripcion: `EP N° ${ep.numero} ${sc.descripcion}`, proveedor: prov?.nombre,
+              documento: `${sc.codigo} · EP ${ep.numero}`, compromisoId: sc.compromisos[l.partidaId], origen: 'ep_subcontrato' as const,
+            }))
+            mutar((x) => ({ epsSubcontrato: x.epsSubcontrato.map((y) => (y.id === id ? nuevo : y)), costos: [...x.costos, ...costos] }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -774,7 +900,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 13,
+      version: 14,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
