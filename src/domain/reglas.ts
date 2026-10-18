@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { estadoRendicion, observacionesRendicion, totalRendicion } from './cajaChica'
 import { CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, IMPRODUCTIVAS_MAX, indicadoresEquipo, MODALIDAD, UTILIZACION_MIN } from './maquinaria'
 import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
 import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
@@ -50,6 +51,7 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-205': 'Baja utilización de maquinaria',
   'RULE-206': 'Horas improductivas de maquinaria sobre umbral',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
+  'RULE-401': 'Rendición con diferencias o sin respaldo',
   'RULE-305': 'OTIF de proveedor bajo',
   'RULE-306': 'Compras urgentes sobre umbral',
   'RULE-402': 'Estado de pago vencido',
@@ -499,6 +501,25 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         accionRequerida: 'Coordinar frentes de trabajo, operador y combustible para que el equipo no espere.',
         responsable: o.jefeTerreno, kpi: 'KMQ-02', valorKpi: k.improductividad ?? undefined,
       })
+  }
+
+  // Caja chica (v1.2): RULE-401 rendición presentada con ítems sin respaldo, sin imputar, sobre el tope o sobre el fondo
+  for (const r of d.rendiciones.filter((x) => x.obraId === o.id && estadoRendicion(x, c.corte) === 'presentada')) {
+    const caja = d.cajasChicas.find((x) => x.id === r.cajaId)
+    if (!caja) continue
+    const obs = observacionesRendicion(r, caja, d.config)
+    if (!obs.items.length && !obs.sobreFondo) continue
+    out.push({
+      regla: 'RULE-401', clave: `RULE-401|${r.id}`, severidad: 'alta', titulo: `Rendición N° ${r.numero} con observaciones`, entidad: `Caja chica · ${caja.responsable}`,
+      datos: [
+        { etiqueta: 'Total rendido', valor: mm(totalRendicion(r)) },
+        ...(obs.sobreFondo ? [{ etiqueta: 'Fondo', valor: `${mm(caja.fondo)} (la rendición lo supera)` }] : []),
+        ...obs.items.slice(0, 3).map((x) => ({ etiqueta: x.item.descripcion, valor: x.obs.join(' · ') })),
+      ],
+      porQue: 'La rendición trae gastos sin respaldo, sin imputar o sobre el tope por ítem.',
+      accionRequerida: 'Observar los ítems, pedir el respaldo y que Finanzas autorice o rechace antes de reponer el fondo.',
+      responsable: o.administrador,
+    })
   }
 
   // Abastecimiento (v1.2): RULE-305 OTIF de proveedor bajo y RULE-306 compras urgentes sobre umbral

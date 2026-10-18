@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R10' | 'R11'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R09' | 'R10' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -12,6 +12,7 @@ export const ROLES: Record<Rol, string> = {
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
   R07: 'Bodega y Adquisiciones',
+  R09: 'Finanzas',
   R10: 'Subcontratista',
   R11: 'Mandante / ITO',
 }
@@ -635,6 +636,44 @@ export interface ParteMaquinaria {
   creadoPor: string
 }
 
+/** Caja chica de obra (08, 10 §17.1): fondo fijo con un responsable. */
+export interface CajaChica {
+  id: string
+  obraId: string
+  responsable: string
+  fondo: number
+  abierta: Dia
+  cerrada?: { fecha: Dia; devolucion: number }
+}
+
+/** Ítem de una rendición (10 §17.2): gasto con comprobante, imputado a partida o a gastos generales. */
+export interface ItemRendicion {
+  id: string
+  fecha: Dia
+  proveedor: string
+  comprobante: 'boleta' | 'factura' | 'sin_documento'
+  numero?: string
+  descripcion: string
+  monto: number
+  /** Partida o 'GG' (gastos generales); vacío = sin imputar (RULE-401). */
+  imputacion: string
+  revision?: { estado: 'aprobado' | 'rechazado'; fecha: Dia; por: string; motivo?: string }
+}
+
+export type EstadoRendicion = 'borrador' | 'presentada' | 'aprobada'
+
+/** Rendición de la caja chica: se presenta, se revisa ítem por ítem y Finanzas repone el fondo. */
+export interface Rendicion {
+  id: string
+  obraId: string
+  cajaId: string
+  numero: number
+  items: ItemRendicion[]
+  historial: PasoDoc<EstadoRendicion>[]
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -857,7 +896,7 @@ export interface RDO {
   validadoPor?: string
 }
 
-export type OrigenCosto = 'importacion' | 'manual' | 'recepcion' | 'ep_subcontrato' | 'parte_maquinaria'
+export type OrigenCosto = 'importacion' | 'manual' | 'recepcion' | 'ep_subcontrato' | 'parte_maquinaria' | 'rendicion'
 
 export interface CostoReal {
   id: string
@@ -1026,6 +1065,8 @@ export interface Config {
     cotizacionesUf?: number
     /** RN-P04: el administrador de obra firma subcontratos hasta este monto en UF; sobre él, Gerencia. */
     limiteSubcontratoUf?: number
+    /** RN-P04: el administrador de obra aprueba ítems de rendición hasta este monto en UF. */
+    limiteRendicionUf?: number
   }
   /** Valor de la UF en pesos para los umbrales expresados en UF. */
   valorUF?: number

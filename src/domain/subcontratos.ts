@@ -154,8 +154,8 @@ const PERMISOS_EP: Partial<Record<EstadoEPSub, Partial<Record<AccionEPSub, Rol[]
   borrador: { presentar: ['R02', 'R10'] },
   presentado: { validar: ['R03'], rechazar: ['R03', 'R02'] },
   validado: { aprobar: ['R02'], rechazar: ['R02'] },
-  // El pago lo registra Finanzas (R09); mientras no exista el rol, el administrador o Gerencia
-  aprobado: { pagar: ['R02', 'R01'] },
+  // El pago lo registra Finanzas (19, RN-P06: quien aprueba no paga)
+  aprobado: { pagar: ['R09'] },
 }
 
 export function accionesEPSub(ep: EPSubcontrato, t: Dia, rol: Rol): AccionEPSub[] {

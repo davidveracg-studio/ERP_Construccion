@@ -15,7 +15,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ItemRendicion,
 } from './types'
 
 function rng(seed: number) {
@@ -916,6 +916,69 @@ function maquinariaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'equipos' | 'partesM
   return { equipos, partesMaquinaria: partes }
 }
 
+/** Usuario de Finanzas (R09) en la demo. */
+const USUARIO_R09 = 'Lorena Castro'
+
+/** Gastos típicos de caja chica: [descripción, proveedor, comprobante, monto base, imputación (código de partida o GG)]. */
+const GASTOS_CAJA: [string, string, ItemRendicion['comprobante'], number, string][] = [
+  ['Discos de corte y brocas', 'Ferretería La Serena', 'boleta', 38_500, '3.3'],
+  ['Clavos, alambre y amarras', 'Ferretería La Serena', 'boleta', 46_200, '3.4'],
+  ['Flete de materiales menores', 'Fletes Coquimbo', 'factura', 85_000, 'GG'],
+  ['Combustible camioneta de obra', 'Copec Ruta 5', 'boleta', 62_000, 'GG'],
+  ['Copias de planos', 'Centro de Copiado Elqui', 'boleta', 18_900, 'GG'],
+  ['Insumos de aseo de instalación de faena', 'Supermercado Unimarc', 'boleta', 27_300, 'GG'],
+  ['Reparación de vibrador de inmersión', 'Servitec Herramientas', 'factura', 95_000, '3.2'],
+  ['Candados y cadenas para bodega', 'Ferretería La Serena', 'boleta', 31_800, 'GG'],
+]
+
+/**
+ * Caja chica de la demo: una por obra en ejecución con rendiciones cada tres semanas repuestas por Finanzas
+ * (una colación sin documento rechazada), una rendición recién presentada y otra en preparación. La de
+ * la obra terminada quedó cerrada con devolución del saldo.
+ */
+function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rendiciones'> {
+  const H = hoyDia
+  const cajas: CajaChica[] = []
+  const rendiciones: Rendicion[] = []
+  for (const obra of d.obras) {
+    const fondo = obra.id === 'obra_aromos' ? 1_500_000 : 800_000
+    const id = `cc_${obra.id}`
+    const terminada = obra.estado !== 'en_ejecucion'
+    const fin = terminada ? Math.min(H - 20, obra.fechaInicio + obra.plazoDias) : H
+    cajas.push({ id, obraId: obra.id, responsable: obra.jefeTerreno, fondo, abierta: obra.fechaInicio, ...(terminada ? { cerrada: { fecha: fin, devolucion: Math.round(fondo * 0.18) } } : {}) })
+    const partida = (cod: string) => (cod === 'GG' ? 'GG' : d.partidas.find((p) => p.id === `${obra.id}_p${cod}`)?.id ?? 'GG')
+    let n = 0
+    for (let ini = obra.fechaInicio; ini + 21 <= fin; ini += 21) {
+      n++
+      const presentada = ini + 20
+      const ultima = !terminada && presentada + 21 > H
+      const items: ItemRendicion[] = GASTOS_CAJA.slice(0, 5 + (n % 3)).map(([descripcion, proveedor, comprobante, base, imp], k) => ({
+        id: `it${k + 1}`, fecha: ini + 2 + k * 3, proveedor, comprobante, numero: `${(n * 131 + k * 17) % 9000 + 1000}`, descripcion,
+        monto: Math.round((base * (1 + ((n + k) % 5) / 10)) / 100) * 100, imputacion: partida(imp),
+      }))
+      const reponer = presentada + 3 <= H - 1 && !ultima
+      // En la segunda rendición (si ya se repuso), una colación sin documento que se rechazó
+      if (n === 2 && reponer) items.push({ id: 'it9', fecha: ini + 15, proveedor: 'Restaurante El Faro', comprobante: 'sin_documento', descripcion: 'Colación de cuadrilla', monto: 54_000, imputacion: 'GG' })
+      const revisado = (i: ItemRendicion): ItemRendicion => ({
+        ...i, revision: i.comprobante === 'sin_documento'
+          ? { estado: 'rechazado', fecha: presentada + 2, por: obra.administrador, motivo: 'Sin documento de respaldo' }
+          : { estado: 'aprobado', fecha: presentada + 2, por: obra.administrador },
+      })
+      if (presentada > H - 1) {
+        // Rendición en preparación (aún no se presenta)
+        rendiciones.push({ id: `rd_${obra.id}_${n}`, obraId: obra.id, cajaId: id, numero: n, items: items.filter((i) => i.fecha <= H - 1), historial: [], creado: ini + 1, creadoPor: obra.jefeTerreno })
+        continue
+      }
+      rendiciones.push({
+        id: `rd_${obra.id}_${n}`, obraId: obra.id, cajaId: id, numero: n, items: reponer ? items.map(revisado) : items,
+        historial: [{ fecha: presentada, estado: 'presentada', por: obra.jefeTerreno }, ...(reponer ? [{ fecha: presentada + 3, estado: 'aprobada' as const, por: USUARIO_R09 }] : [])],
+        creado: ini + 1, creadoPor: obra.jefeTerreno,
+      })
+    }
+  }
+  return { cajasChicas: cajas, rendiciones }
+}
+
 /**
  * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
  * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
@@ -1445,7 +1508,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 13
+export const VERSION_DEMO = 14
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1464,7 +1527,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1513,6 +1576,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, cumplimientoDemo(d, hoyDia))
   // Maquinaria: equipos y partes diarios de las últimas 8 semanas
   Object.assign(d, maquinariaDemo(d, hoyDia))
+  // Caja chica y rendiciones
+  Object.assign(d, cajaChicaDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

@@ -107,7 +107,8 @@ const PERMISOS: Partial<Record<EstadoOC, Partial<Record<AccionOC, Rol[]>>>> = {
   por_aprobar: { aprobar: ['R02', 'R01'], devolver: ['R02', 'R01'], anular: ['R07', 'R02'] },
   aprobada: { enviar: ['R07'], anular: ['R07', 'R02'] },
   enviada: { anular: ['R07', 'R02'] },
-  recibida: { cerrar: ['R07', 'R02'] },
+  // La factura la registra Finanzas (10 §13)
+  recibida: { cerrar: ['R09'] },
 }
 
 /** RN-P04 / RULE-301 y RULE-304: sobre el límite o fuera de presupuesto la aprueba Gerencia. */

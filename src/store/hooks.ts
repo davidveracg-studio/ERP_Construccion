@@ -15,7 +15,7 @@ export function useDatosDominio(): Datos {
       periodos: s.periodos, alertas: s.alertas, estadosPago: s.estadosPago, ordenesCambio: s.ordenesCambio,
       obligaciones: s.obligaciones, garantias: s.garantias, recepciones: s.recepciones, riesgos: s.riesgos,
       documentos: s.documentos, rfis: s.rfis, submittals: s.submittals, folios: s.folios, tareasSemanales: s.tareasSemanales,
-      proveedores: s.proveedores, materiales: s.materiales, solicitudesMaterial: s.solicitudesMaterial, ordenesCompra: s.ordenesCompra, movimientosStock: s.movimientosStock, subcontratos: s.subcontratos, epsSubcontrato: s.epsSubcontrato, trabajadores: s.trabajadores, documentosLaborales: s.documentosLaborales, equipos: s.equipos, partesMaquinaria: s.partesMaquinaria,
+      proveedores: s.proveedores, materiales: s.materiales, solicitudesMaterial: s.solicitudesMaterial, ordenesCompra: s.ordenesCompra, movimientosStock: s.movimientosStock, subcontratos: s.subcontratos, epsSubcontrato: s.epsSubcontrato, trabajadores: s.trabajadores, documentosLaborales: s.documentosLaborales, equipos: s.equipos, partesMaquinaria: s.partesMaquinaria, cajasChicas: s.cajasChicas, rendiciones: s.rendiciones,
     })),
   )
   return s
