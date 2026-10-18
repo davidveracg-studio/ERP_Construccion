@@ -19,6 +19,7 @@ import Riesgos, { DetalleRiesgo } from './pages/Riesgos'
 import Documentos, { DetalleRFI, DetalleSubmittal } from './pages/Documentos'
 import LibroObra from './pages/LibroObra'
 import PlanSemanal from './pages/PlanSemanal'
+import Compras, { DetalleOC as DetalleOrdenCompra } from './pages/Compras'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -35,7 +36,7 @@ import { useStore } from './store/store'
 // three.js pesa: la simulación 4D se carga solo al abrirla
 const Obra4D = lazy(() => import('./pages/Obra4D'))
 
-const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos', R11: '/mandante' } as const
+const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos', R07: '/compras', R11: '/mandante' } as const
 
 function Inicio() {
   const rol = useStore((s) => s.ui.rol)
@@ -95,6 +96,8 @@ function Rutas() {
               <Route path="partida/:id" element={<PartidaDetalle />} />
               <Route path="programa" element={<Programa />} />
               <Route path="plan-semanal" element={<PlanSemanal />} />
+              <Route path="compras" element={<Compras />} />
+              <Route path="compras/oc/:id" element={<DetalleOrdenCompra />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />

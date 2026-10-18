@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import type { CeldaSemaforo } from '../domain/semaforo'
-import { idx, mm, pp, signoPct } from '../domain/formato'
+import { idx, mm, pct, pp, signoPct } from '../domain/formato'
 import { cx, Luz } from './ui'
 
 export function valorCelda(c: CeldaSemaforo): string {
@@ -8,12 +8,15 @@ export function valorCelda(c: CeldaSemaforo): string {
   if (c.dim === 'avance') return pp(c.valor)
   if (c.dim === 'productividad') return signoPct(c.valor)
   if (c.dim === 'caja') return mm(c.valor ?? 0)
+  if (c.dim === 'compras') return pct(c.valor ?? 0, 0)
   return idx(c.valor)
 }
 
-/** Ruta que explica una dimensión: la caja tiene su propia pantalla. */
+/** Ruta que explica una dimensión: caja y compras tienen su propia pantalla. */
 export function rutaDimension(dim: CeldaSemaforo['dim'], obraId?: string) {
-  return dim === 'caja' ? '/caja' : `/explicacion/${dim}${obraId ? `?obra=${obraId}` : ''}`
+  if (dim === 'caja') return '/caja'
+  if (dim === 'compras') return '/compras'
+  return `/explicacion/${dim}${obraId ? `?obra=${obraId}` : ''}`
 }
 
 /** Semáforo ejecutivo de 8 dimensiones (14 §5.3); cada celda abre la explicación. */

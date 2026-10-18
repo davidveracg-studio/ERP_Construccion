@@ -21,11 +21,15 @@ import {
 import {
   accionesTarea, aplicarAccionTarea, estadoTarea, puedeGestionarRestricciones, puedePlanificar, replanificar, type AccionTarea,
 } from '../domain/lastPlanner'
+import {
+  accionesOC as accionesCompra, aplicarAccionOC as aplicarAccionCompra, codigoOC, estadoOC as estadoCompra, puedeComprar, puedeEditarCatalogo,
+  puedeEditarProveedores, puedeRechazarSolicitud, puedeRecibir, puedeSolicitar, registrarRecepcion, type AccionOC as AccionCompra,
+} from '../domain/compras'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC,
 } from '../domain/types'
 
 export interface UI {
@@ -40,6 +44,7 @@ export const USUARIOS: Record<Rol, string> = {
   R03: 'Juan Soto',
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
+  R07: 'Patricia Lagos',
   R11: 'ITO del mandante',
 }
 
@@ -123,6 +128,16 @@ export interface Acciones {
   accionTarea: (id: string, accion: AccionTarea, datos?: { logrado?: number; causa?: CausaNoCumplimiento; nota?: string }) => string | null
   /** Crea en la semana siguiente una tarea con lo que faltó de una no cumplida. */
   replanificarTarea: (id: string) => string | null
+  guardarProveedor: (p: Omit<Proveedor, 'id'> & { id?: string }) => string | null
+  guardarMaterial: (m: Omit<Material, 'id'> & { id?: string }) => string | null
+  crearSolicitud: (x: Pick<SolicitudMaterial, 'obraId' | 'materialId' | 'cantidad' | 'partidaId' | 'fechaRequerida' | 'urgencia' | 'nota'>) => string | null
+  rechazarSolicitud: (id: string, motivo: string) => string | null
+  /** Crea una OC en borrador (desde solicitudes o directa); devuelve su id o el error. */
+  crearOrdenCompra: (oc: Pick<OrdenCompra, 'obraId' | 'proveedorId' | 'fechaEntrega' | 'urgente' | 'cotizaciones' | 'justificacion'> & { lineas: Omit<LineaOC, 'id'>[] }) => { id?: string; error?: string }
+  editarOrdenCompra: (id: string, cambios: Partial<Pick<OrdenCompra, 'proveedorId' | 'fechaEntrega' | 'urgente' | 'cotizaciones' | 'justificacion' | 'lineas'>>) => void
+  accionOrdenCompra: (id: string, accion: AccionCompra, texto?: string) => string | null
+  /** Recepción con guía: suma la cantidad recibida y genera el costo real de cada línea. */
+  recibirOrdenCompra: (id: string, r: { guia: string; cantidades: Record<string, number> }) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -607,6 +622,103 @@ export const useStore = create<Estado>()(
           mutar((st) => ({ tareasSemanales: [...st.tareasSemanales, nueva] }))
           return null
         },
+        guardarProveedor: (p) => {
+          const s = getS()
+          if (!puedeEditarProveedores(s.ui.rol)) return 'Los proveedores los mantiene Bodega y Adquisiciones.'
+          if (!p.nombre.trim() || !p.rut.trim()) return 'Indica nombre y RUT.'
+          if (p.estado === 'bloqueado' && !p.motivoBloqueo?.trim()) return 'Indica el motivo del bloqueo.'
+          const id = p.id ?? uid('prov')
+          mutar((x) => ({ proveedores: p.id ? x.proveedores.map((y) => (y.id === p.id ? { ...p, id } : y)) : [...x.proveedores, { ...p, id }] }))
+          return null
+        },
+        guardarMaterial: (m) => {
+          const s = getS()
+          if (!puedeEditarCatalogo(s.ui.rol)) return 'El catálogo lo mantienen Bodega y Oficina Técnica.'
+          if (!m.codigo.trim() || !m.nombre.trim() || !m.unidad.trim()) return 'Indica código, nombre y unidad.'
+          if (s.materiales.some((y) => y.id !== m.id && y.codigo.toLowerCase() === m.codigo.trim().toLowerCase())) return `Ya existe el código ${m.codigo.trim()}.`
+          const id = m.id ?? uid('mat')
+          mutar((x) => ({ materiales: m.id ? x.materiales.map((y) => (y.id === m.id ? { ...m, id } : y)) : [...x.materiales, { ...m, id }] }))
+          return null
+        },
+        crearSolicitud: (sol) => {
+          const s = getS()
+          if (!puedeSolicitar(s.ui.rol)) return 'Solicitan material el jefe de terreno y los capataces.'
+          if (!(sol.cantidad > 0)) return 'Indica la cantidad.'
+          const t = hoy()
+          if (sol.fechaRequerida < t) return 'La fecha requerida no puede estar en el pasado.'
+          const numero = Math.max(0, ...s.solicitudesMaterial.filter((x) => x.obraId === sol.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ solicitudesMaterial: [...x.solicitudesMaterial, { ...sol, id: uid('sm'), numero, historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        rechazarSolicitud: (id, motivo) => {
+          const s = getS()
+          if (!puedeRechazarSolicitud(s.ui.rol)) return 'Tu rol no puede rechazar solicitudes.'
+          if (!motivo.trim()) return 'Indica el motivo.'
+          const t = hoy()
+          mutar((x) => ({ solicitudesMaterial: x.solicitudesMaterial.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'rechazada' as const, por: s.ui.usuario, texto: motivo.trim() }] } : y)) }))
+          return null
+        },
+        crearOrdenCompra: (oc) => {
+          const s = getS()
+          if (!puedeComprar(s.ui.rol)) return { error: 'Las órdenes de compra las emite Bodega y Adquisiciones.' }
+          const prov = s.proveedores.find((p) => p.id === oc.proveedorId)
+          if (!prov) return { error: 'Elige el proveedor.' }
+          if (prov.estado !== 'activo') return { error: `RULE-302: el proveedor está ${prov.estado}${prov.motivoBloqueo ? ` (${prov.motivoBloqueo})` : ''}.` }
+          if (oc.lineas.length === 0) return { error: 'Agrega al menos una línea.' }
+          const t = hoy()
+          const id = uid('oc')
+          const numero = Math.max(0, ...s.ordenesCompra.map((x) => x.numero)) + 1
+          const lineas = oc.lineas.map((l) => ({ ...l, id: uid('lo') }))
+          const solicitudes = new Set(lineas.map((l) => l.solicitudId).filter(Boolean))
+          mutar((x) => ({
+            ordenesCompra: [...x.ordenesCompra, { ...oc, id, numero, lineas, historial: [], recepciones: [], creado: t, creadoPor: s.ui.usuario }],
+            solicitudesMaterial: x.solicitudesMaterial.map((y) => (solicitudes.has(y.id) ? { ...y, ordenCompraId: id, historial: [...y.historial, { fecha: t, estado: 'en_compra' as const, por: s.ui.usuario }] } : y)),
+          }))
+          return { id }
+        },
+        editarOrdenCompra: (id, cambios) =>
+          mutar((s) => ({ ordenesCompra: s.ordenesCompra.map((o) => (o.id === id && estadoCompra(o, hoy()) === 'borrador' ? { ...o, ...cambios } : o)) })),
+        accionOrdenCompra: (id, accion, texto) => {
+          const s = getS()
+          const oc = s.ordenesCompra.find((x) => x.id === id)
+          if (!oc) return 'La orden de compra no existe.'
+          const t = hoy()
+          if (!accionesCompra(oc, t, s.ui.rol, s.config).includes(accion))
+            return accion === 'aprobar' && s.ui.rol === 'R02' ? 'Supera tu límite de aprobación o está fuera de presupuesto: la aprueba Gerencia (R01).' : 'Tu rol no puede hacer esta acción en este estado.'
+          try {
+            const c = accion === 'enviar_aprobacion' ? calcularObra(s, oc.obraId, t) : null
+            const saldoPartida = (pid: string) => { const cp = c?.partidas.find((p) => p.p.id === pid); return cp ? cp.bac - cp.ac - cp.comprometido : Infinity }
+            const nueva = aplicarAccionCompra(oc, accion, { fecha: t, autor: s.ui.usuario, texto, proveedor: s.proveedores.find((p) => p.id === oc.proveedorId), cfg: s.config, saldoPartida })
+            mutar((x) => ({ ordenesCompra: x.ordenesCompra.map((y) => (y.id === id ? nueva : y)) }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
+        recibirOrdenCompra: (id, r) => {
+          const s = getS()
+          const oc = s.ordenesCompra.find((x) => x.id === id)
+          if (!oc) return 'La orden de compra no existe.'
+          const t = hoy()
+          if (!puedeRecibir(oc, t, s.ui.rol)) return 'Reciben Bodega o el jefe de terreno, con la OC enviada al proveedor.'
+          try {
+            const nueva = registrarRecepcion(oc, { id: uid('rec'), fecha: t, guia: r.guia, cantidades: r.cantidades, recibidoPor: s.ui.usuario })
+            const rec = nueva.recepciones.at(-1)!
+            const prov = s.proveedores.find((p) => p.id === oc.proveedorId)
+            const costos = Object.entries(rec.cantidades).map(([lid, q]) => {
+              const l = oc.lineas.find((x) => x.id === lid)!
+              const mat = s.materiales.find((m) => m.id === l.materialId)
+              return {
+                id: uid('co'), obraId: oc.obraId, fecha: t, partidaId: l.partidaId, tipo: 'MAT' as const, cantidad: q, precio: l.precio, monto: Math.round(q * l.precio),
+                descripcion: `${mat?.nombre ?? 'Material'} (${codigoOC(oc)})`, proveedor: prov?.nombre, documento: `${codigoOC(oc)} · guía ${rec.guia}`, origen: 'recepcion' as const,
+              }
+            })
+            mutar((x) => ({ ordenesCompra: x.ordenesCompra.map((y) => (y.id === id ? nueva : y)), costos: [...x.costos, ...costos] }))
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -614,7 +726,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 11,
+      version: 12,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

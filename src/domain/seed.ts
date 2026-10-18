@@ -14,7 +14,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra,
 } from './types'
 
 function rng(seed: number) {
@@ -519,6 +519,125 @@ function contratoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'obligaciones' | 'gara
   }
 }
 
+/** Usuario de Bodega y Adquisiciones (R07) en la demo. */
+const USUARIO_R07 = 'Patricia Lagos'
+
+/** Proveedores y catálogo de materiales de la demo (a nivel de empresa). */
+const PROVEEDORES_DEMO: Proveedor[] = [
+  { id: 'prov_hormigones', rut: '76.410.220-3', nombre: 'Hormigones Sur Ltda.', rubro: 'Hormigones premezclados', contacto: 'Rodrigo Díaz', estado: 'activo' },
+  { id: 'prov_moldajes', rut: '77.125.300-K', nombre: 'Moldajes Pacífico', rubro: 'Arriendo de moldajes', contacto: 'Fernanda Ríos', estado: 'activo' },
+  { id: 'prov_ladrillos', rut: '96.540.110-2', nombre: 'Ladrillos del Norte S.A.', rubro: 'Albañilería', contacto: 'Jaime Ortiz', estado: 'activo' },
+  { id: 'prov_morteros', rut: '76.880.450-1', nombre: 'Morteros Elqui', rubro: 'Morteros y estucos', contacto: 'Claudia Paz', estado: 'activo' },
+  { id: 'prov_ceramicas', rut: '78.230.900-5', nombre: 'Cerámicas del Pacífico', rubro: 'Revestimientos', contacto: 'Ignacio Vera', estado: 'activo' },
+  { id: 'prov_aridos', rut: '76.050.770-8', nombre: 'Áridos Coquimbo', rubro: 'Áridos y estabilizado', contacto: 'Marcela Soto', estado: 'activo' },
+  { id: 'prov_volcan', rut: '96.700.330-4', nombre: 'Distribuidora Volcán Norte', rubro: 'Perfiles y placas', contacto: 'Pablo Godoy', estado: 'activo' },
+  { id: 'prov_cielos', rut: '77.640.120-6', nombre: 'Cielos Modulares Norte', rubro: 'Cielos modulares', contacto: 'Andrea Muñoz', estado: 'activo' },
+  { id: 'prov_andina', rut: '76.330.010-9', nombre: 'Comercial Andina SpA', rubro: 'Ferretería', estado: 'bloqueado', motivoBloqueo: 'Deuda previsional informada en el F30' },
+  { id: 'prov_ferreteria', rut: '76.990.540-7', nombre: 'Ferretería La Serena', rubro: 'Ferretería', estado: 'inactivo' },
+]
+
+/** Material del catálogo y proveedor habitual por descripción del recurso del presupuesto. */
+const MATERIALES_DEMO: (Material & { recurso: string; proveedor: string })[] = [
+  { id: 'mat_h25', codigo: 'M-101', nombre: 'Hormigón H-25', unidad: 'm³', categoria: 'Hormigones', critico: true, recurso: 'Hormigón H-25', proveedor: 'prov_hormigones' },
+  { id: 'mat_h30', codigo: 'M-102', nombre: 'Hormigón H-30', unidad: 'm³', categoria: 'Hormigones', critico: true, recurso: 'Hormigón H-30', proveedor: 'prov_hormigones' },
+  { id: 'mat_estab', codigo: 'M-110', nombre: 'Estabilizado', unidad: 'm³', categoria: 'Áridos', critico: false, recurso: 'Estabilizado', proveedor: 'prov_aridos' },
+  { id: 'mat_moldaje', codigo: 'M-201', nombre: 'Arriendo de moldaje', unidad: 'm²', categoria: 'Moldajes', critico: true, recurso: 'Arriendo moldaje', proveedor: 'prov_moldajes' },
+  { id: 'mat_ladrillo', codigo: 'M-301', nombre: 'Ladrillo y mortero de pega', unidad: 'm²', categoria: 'Albañilería', critico: false, recurso: 'Ladrillo y mortero', proveedor: 'prov_ladrillos' },
+  { id: 'mat_mortero', codigo: 'M-302', nombre: 'Mortero de estuco', unidad: 'm²', categoria: 'Terminaciones', critico: false, recurso: 'Mortero', proveedor: 'prov_morteros' },
+  { id: 'mat_ceramico', codigo: 'M-401', nombre: 'Cerámico 60×60 y adhesivo', unidad: 'm²', categoria: 'Terminaciones', critico: false, recurso: 'Cerámico y adhesivo', proveedor: 'prov_ceramicas' },
+  { id: 'mat_perfiles', codigo: 'M-501', nombre: 'Perfiles y placas de yeso-cartón', unidad: 'm²', categoria: 'Tabiquería', critico: false, recurso: 'Perfiles y placas', proveedor: 'prov_volcan' },
+  { id: 'mat_cielo', codigo: 'M-502', nombre: 'Cielo modular 60×60', unidad: 'm²', categoria: 'Terminaciones', critico: false, recurso: 'Cielo modular', proveedor: 'prov_cielos' },
+  { id: 'mat_epp', codigo: 'M-901', nombre: 'Elementos de protección personal', unidad: 'kit', categoria: 'EPP', critico: false, recurso: '', proveedor: 'prov_ferreteria' },
+]
+
+/**
+ * Compras de la demo armadas con el avance real de los RDO: cada semana, cada partida con material tuvo
+ * su OC entregada el día anterior al lunes (una con atraso y una en dos entregas). Las OC en curso no
+ * tocan las partidas de hormigón (ya comprometidas con el contrato marco OC-1021).
+ */
+function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' | 'ordenesCompra'> {
+  const solicitudes: SolicitudMaterial[] = []
+  const ordenes: OrdenCompra[] = []
+  const lunesHoy = hoyDia - ((diaSemana(hoyDia) + 6) % 7)
+  // Desde la 1101: la OC-1021 es el contrato marco de hormigón (compromiso importado)
+  let numero = 1100
+  const bodeguero = USUARIO_R07
+  const precioVar = (precio: number, k: number) => Math.round(precio * (1 + (((k * 37) % 7) - 3) / 100))
+  const paso = <E extends string>(fecha: Dia, estado: E, por: string) => ({ fecha, estado, por })
+  for (const obra of d.obras) {
+    const semanas: number[] = []
+    for (let k = 13; k >= 1; k--) semanas.push(lunesHoy - 7 * k)
+    let nSol = 0
+    let k = 0
+    let hormigones = 0
+    for (const L of semanas) {
+      for (const p of d.partidas.filter((x) => x.obraId === obra.id)) {
+        const rec = p.recursos.find((r) => r.tipo === 'MAT')
+        const mat = rec && MATERIALES_DEMO.find((m) => m.recurso === rec.descripcion)
+        if (!rec || !mat) continue
+        const avance = d.rdos.filter((r) => r.obraId === obra.id && r.fecha >= L && r.fecha <= L + 6).reduce((s, r) => s + r.avances.filter((a) => a.partidaId === p.id).reduce((x, a) => x + a.cantidad, 0), 0)
+        const cantidad = Math.round(avance * rec.cantPorUnidad)
+        if (cantidad < 1 || L - 6 < obra.fechaInicio - 7) continue
+        k++
+        numero++
+        const id = `oc_${obra.id}_${numero}`
+        const conSolicitud = k % 2 === 0
+        const solId = `sm_${obra.id}_${numero}`
+        if (conSolicitud) {
+          nSol++
+          solicitudes.push({
+            id: solId, obraId: obra.id, numero: nSol, materialId: mat.id, cantidad, partidaId: p.id, fechaRequerida: L - 1, urgencia: 'planificada',
+            historial: [paso(L - 5, 'en_compra' as const, bodeguero)], ordenCompraId: id, creado: L - 6, creadoPor: obra.jefeTerreno,
+          })
+        }
+        // Una entrega con atraso, del proveedor con más OC (no baja su OTIF de 90 días del mínimo)
+        if (mat.proveedor === 'prov_hormigones') hormigones++
+        const atrasada = obra.id === 'obra_aromos' && mat.proveedor === 'prov_hormigones' && hormigones === 6
+        const enDos = obra.id === 'obra_aromos' && k === 4
+        const linea = { id: 'l1', materialId: mat.id, cantidad, precio: precioVar(rec.precio, k), partidaId: p.id, ...(conSolicitud ? { solicitudId: solId } : {}) }
+        const mitad = Math.round(cantidad / 2)
+        ordenes.push({
+          id, obraId: obra.id, numero, proveedorId: mat.proveedor, lineas: [linea], fechaEntrega: L - 1, urgente: k % 11 === 0, cotizaciones: 3,
+          historial: [paso(L - 5, 'por_aprobar' as const, bodeguero), paso(L - 4, 'aprobada' as const, obra.administrador), paso(L - 4, 'enviada' as const, bodeguero)],
+          recepciones: enDos
+            ? [{ id: 'r1', fecha: L - 3, guia: `${40_000 + numero}`, cantidades: { l1: mitad }, recibidoPor: bodeguero }, { id: 'r2', fecha: L - 1, guia: `${40_500 + numero}`, cantidades: { l1: cantidad - mitad }, recibidoPor: bodeguero }]
+            : [{ id: 'r1', fecha: atrasada ? L + 1 : L - 2, guia: `${40_000 + numero}`, cantidades: { l1: cantidad }, recibidoPor: bodeguero }],
+          creado: L - 5, creadoPor: bodeguero,
+        })
+      }
+    }
+  }
+  // En curso en las obras en ejecución: OC enviada, aprobada, por aprobar (sobre el límite: Gerencia) y solicitudes por atender
+  const curso = (obraId: string, n: number, materialId: string, partidaCod: string, cantidad: number, estados: OrdenCompra['historial'], entrega: Dia, extra: Partial<OrdenCompra> = {}) => {
+    const mat = MATERIALES_DEMO.find((m) => m.id === materialId)!
+    const p = d.partidas.find((x) => x.id === `${obraId}_p${partidaCod}`)!
+    const precio = p.recursos.find((r) => r.tipo === 'MAT')!.precio
+    ordenes.push({
+      id: `oc_${obraId}_${n}`, obraId, numero: n, proveedorId: mat.proveedor, lineas: [{ id: 'l1', materialId, cantidad, precio, partidaId: p.id }],
+      fechaEntrega: entrega, urgente: false, cotizaciones: 3, historial: estados, recepciones: [], creado: estados[0]?.fecha ?? hoyDia - 1, creadoPor: bodeguero, ...extra,
+    })
+  }
+  const aromos = d.obras.find((o) => o.id === 'obra_aromos')!
+  const clinica = d.obras.find((o) => o.id === 'obra_clinica')!
+  curso('obra_aromos', 1301, 'mat_moldaje', '3.4', 1700, [paso(hoyDia - 4, 'por_aprobar', bodeguero), paso(hoyDia - 3, 'aprobada', aromos.administrador), paso(hoyDia - 3, 'enviada', bodeguero)], hoyDia + 3)
+  curso('obra_aromos', 1302, 'mat_ceramico', '5.2', 300, [paso(hoyDia - 2, 'por_aprobar', bodeguero), paso(hoyDia - 1, 'aprobada', aromos.administrador)], hoyDia + 8)
+  curso('obra_aromos', 1303, 'mat_ladrillo', '4.1', 600, [paso(hoyDia - 1, 'por_aprobar', bodeguero)], hoyDia + 6)
+  curso('obra_clinica', 1304, 'mat_cielo', '2.2', 150, [paso(hoyDia - 3, 'por_aprobar', bodeguero), paso(hoyDia - 2, 'aprobada', clinica.administrador), paso(hoyDia - 2, 'enviada', bodeguero)], hoyDia + 2)
+  const sol = (obraId: string, materialId: string, partidaCod: string, cantidad: number, requerida: Dia, extra: Partial<SolicitudMaterial> = {}) => {
+    const obra = d.obras.find((o) => o.id === obraId)!
+    const numeroSol = solicitudes.filter((s) => s.obraId === obraId).length + 1
+    solicitudes.push({
+      id: `sm_${obraId}_c${numeroSol}`, obraId, numero: numeroSol, materialId, cantidad, partidaId: `${obraId}_p${partidaCod}`, fechaRequerida: requerida, urgencia: 'planificada',
+      historial: [], creado: hoyDia - 1, creadoPor: obra.jefeTerreno, ...extra,
+    })
+  }
+  sol('obra_aromos', 'mat_mortero', '5.1', 420, hoyDia + 9)
+  sol('obra_aromos', 'mat_epp', '1.1', 12, hoyDia + 4, { nota: 'Reposición de kits para cuadrilla nueva', historial: [paso(hoyDia - 1, 'rechazada', bodeguero)], creadoPor: aromos.jefeTerreno })
+  sol('obra_clinica', 'mat_perfiles', '2.1', 60, hoyDia + 10)
+  solicitudes.at(-2)!.historial[0] = { ...solicitudes.at(-2)!.historial[0], texto: 'Hay stock de EPP en bodega central; se despacha desde allá.' }
+  return { solicitudesMaterial: solicitudes, ordenesCompra: ordenes }
+}
+
 /**
  * Plan semanal de la demo, armado con los RDO reales: en cada semana cerrada cada cuadrilla tuvo una tarea
  * por partida trabajada, con meta bajo lo logrado (cumplida) o sobre lo logrado (no cumplida, con causa).
@@ -987,7 +1106,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 8
+export const VERSION_DEMO = 9
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1006,7 +1125,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1044,6 +1163,10 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, documentalDemo(d, hoyDia))
   // Plan semanal Last Planner (sale de los RDO)
   d.tareasSemanales = lastPlannerDemo(d, hoyDia)
+  // Abastecimiento: proveedores, catálogo, solicitudes y órdenes de compra (salen de los RDO)
+  d.proveedores = PROVEEDORES_DEMO.map((x) => ({ ...x }))
+  d.materiales = MATERIALES_DEMO.map(({ recurso: _r, proveedor: _p, ...m }) => m)
+  Object.assign(d, comprasDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

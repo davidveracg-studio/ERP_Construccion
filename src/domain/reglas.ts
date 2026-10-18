@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
 import { CAUSAS_CNC, indicadoresLP, PPC_ALERTA, PPC_ROJO, restriccionesAbiertas, restriccionUrgente, TIPOS_RESTRICCION } from './lastPlanner'
 import { DESTINATARIOS_RFI, folioPendiente, partidasCriticas, rfiVencido, terrenoDesactualizado, tocaCriticas, revisionVigente, TIPOS_FOLIO } from './documental'
 import { ETAPAS_OC, etapaOC } from './ordenesCambio'
@@ -43,6 +44,8 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-114': 'Restricción sin liberar a 48 h del inicio',
   'RULE-110': 'Registro de HH inconsistente',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
+  'RULE-305': 'OTIF de proveedor bajo',
+  'RULE-306': 'Compras urgentes sobre umbral',
   'RULE-402': 'Estado de pago vencido',
   'RULE-403': 'Estado de pago no presentado a tiempo',
   'RULE-404': 'Garantía por vencer o vencida',
@@ -427,6 +430,32 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       responsable: o.administrador,
     })
   }
+
+  // Abastecimiento (v1.2): RULE-305 OTIF de proveedor bajo y RULE-306 compras urgentes sobre umbral
+  const proveedoresObra = new Set(d.ordenesCompra.filter((x) => x.obraId === o.id).map((x) => x.proveedorId))
+  for (const pid of proveedoresObra) {
+    const ot = otifProveedor(d.ordenesCompra, pid, c.corte)
+    if (ot.valor == null || ot.n < 3 || ot.valor >= OTIF_PROVEEDOR_MIN) continue
+    const prov = d.proveedores.find((x) => x.id === pid)
+    out.push({
+      regla: 'RULE-305', clave: `RULE-305|${pid}`, severidad: 'media', titulo: `OTIF bajo del proveedor ${prov?.nombre ?? pid}: ${pct(ot.valor, 0)}`, entidad: prov?.rubro ?? 'Proveedor',
+      datos: [{ etiqueta: 'Entregas a tiempo y completas (90 días)', valor: `${ot.ok} de ${ot.n}` }, { etiqueta: 'Mínimo', valor: pct(OTIF_PROVEEDOR_MIN, 0) }],
+      porQue: 'El proveedor entrega tarde o incompleto con frecuencia.',
+      queProvoca: 'Los atrasos de material detienen cuadrillas y generan compras urgentes.',
+      accionRequerida: 'Conversar con el proveedor, exigir compromiso de entrega y evaluar un proveedor alternativo para los materiales críticos.',
+      responsable: o.administrador,
+    })
+  }
+  const urg = urgentesMes(d.ordenesCompra, o.id, c.corte)
+  if (urg.fraccion != null && urg.n >= 5 && urg.fraccion > URGENTES_MAX)
+    out.push({
+      regla: 'RULE-306', clave: `RULE-306|${o.id}`, severidad: 'media', titulo: `Compras urgentes del último mes: ${pct(urg.fraccion, 0)}`, entidad: o.nombre,
+      datos: [{ etiqueta: 'OC urgentes / emitidas', valor: `${urg.urgentes.length} / ${urg.n}` }, { etiqueta: 'Urgentes', valor: urg.urgentes.map(codigoOC).join(', ') }],
+      porQue: 'Más de una de cada cinco compras se pidió como urgente.',
+      queProvoca: 'Comprar urgente cuesta más y suele delatar una planificación de corto plazo deficiente.',
+      accionRequerida: 'Revisar en la reunión semanal qué partidas originaron las urgencias y anticipar las solicitudes en el plan.',
+      responsable: o.administrador,
+    })
 
   // Last Planner (v1.1): RULE-113 PPC de la última semana cerrada bajo meta y RULE-114 restricción sin liberar a 48 h
   const tareas = d.tareasSemanales.filter((x) => x.obraId === o.id)
