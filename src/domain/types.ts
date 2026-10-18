@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R11'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R10' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -12,6 +12,7 @@ export const ROLES: Record<Rol, string> = {
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
   R07: 'Bodega y Adquisiciones',
+  R10: 'Subcontratista',
   R11: 'Mandante / ITO',
 }
 
@@ -550,6 +551,37 @@ export interface EPSubcontrato {
   /** Multas y descuentos que se aplican en este EP. */
   descuentos: number
   historial: PasoDoc<EstadoEPSub>[]
+  creado: Dia
+  creadoPor: string
+}
+
+export type TipoDocLaboral = 'f30' | 'f30_1' | 'contrato' | 'informacion_riesgos' | 'epp'
+export type EstadoDocLaboral = 'pendiente' | 'cargado' | 'validado' | 'rechazado' | 'por_vencer' | 'vencido'
+
+/** Trabajador de un subcontratista en la obra (08 Trabajador). */
+export interface Trabajador {
+  id: string
+  obraId: string
+  subcontratistaId: string
+  rut: string
+  nombre: string
+  oficio: string
+  ingreso: Dia
+  salida?: Dia
+}
+
+/** Documento laboral (08, 10 §19): de la empresa (F30, F30-1 del período) o de un trabajador. */
+export interface DocumentoLaboral {
+  id: string
+  obraId: string
+  subcontratistaId: string
+  trabajadorId?: string
+  tipo: TipoDocLaboral
+  /** Mes al que corresponde (AAAA-MM), para el F30-1. */
+  periodo?: string
+  vencimiento?: Dia
+  archivo?: ArchivoDoc
+  historial: PasoDoc<'cargado' | 'validado' | 'rechazado'>[]
   creado: Dia
   creadoPor: string
 }

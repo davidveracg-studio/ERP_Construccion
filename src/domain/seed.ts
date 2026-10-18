@@ -5,16 +5,17 @@ import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
 import { CONFIG_DEFECTO, type Datos } from './datos'
 import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from './estadosPago'
-import { diaSemana, finDeMes } from './fechas'
+import { diaSemana, finDeMes, iso } from './fechas'
 import { conIdsDeterministas } from './formato'
 import { inferirModelo } from './modelo4d'
 import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
 import { estadoObraPorRecepcion } from './contrato'
+import { f301Vigente } from './cumplimiento'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral,
 } from './types'
 
 function rng(seed: number) {
@@ -747,6 +748,84 @@ function subcontratosDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'proveedores' | 's
   return { proveedores, subcontratos, epsSubcontrato: eps, compromisos }
 }
 
+const NOMBRES_DEMO = ['Juan Araya', 'Pedro Muñoz', 'Luis Tapia', 'Jorge Rojas', 'Manuel Castillo', 'Carlos Vega', 'Diego Flores', 'Andrés Torres', 'Víctor Soto', 'Francisco Díaz', 'Cristián Pérez', 'José Morales']
+const OFICIOS_DEMO: Record<string, string[]> = {
+  Enfierradura: ['Maestro enfierrador', 'Enfierrador', 'Ayudante enfierrador'],
+  'Instalaciones sanitarias': ['Maestro gásfiter', 'Gásfiter', 'Ayudante'],
+  'Instalaciones eléctricas': ['Maestro electricista', 'Electricista', 'Ayudante eléctrico'],
+  Pintura: ['Maestro pintor', 'Pintor'],
+  Climatización: ['Técnico en climatización', 'Instalador'],
+  'Estructuras metálicas': ['Maestro soldador', 'Montajista', 'Rigger'],
+  'Cubiertas y revestimientos': ['Maestro cubiertero', 'Instalador de revestimientos'],
+}
+
+/**
+ * Cumplimiento laboral de la demo: trabajadores acreditados (contrato, información de riesgos y EPP),
+ * F30 vigente y F30-1 mensual de cada subcontratista. Eléctrica Norte (la empresa del usuario R10) no tiene
+ * validados los F30-1 de sus dos últimos meses en las bodegas (el último está cargado sin revisar): su EP
+ * final queda aprobado pero bloqueado para el pago (RULE-701). El F30 de Eléctrica
+ * Norte en el edificio está por vencer.
+ */
+function cumplimientoDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'trabajadores' | 'documentosLaborales'> {
+  const trabajadores: Trabajador[] = []
+  const docs: DocumentoLaboral[] = []
+  const H = hoyDia
+  let n = 0
+  const doc = (sc: Subcontrato, tipo: DocumentoLaboral['tipo'], cargado: Dia, validado: Dia | null, extra: Partial<DocumentoLaboral> = {}) => {
+    if (cargado > H - 1) return
+    const obra = d.obras.find((o) => o.id === sc.obraId)!
+    docs.push({
+      id: `dl_${++n}`, obraId: sc.obraId, subcontratistaId: sc.subcontratistaId, tipo, creado: cargado, creadoPor: 'Subcontratista',
+      historial: [{ fecha: cargado, estado: 'cargado', por: 'Subcontratista' }, ...(validado != null && validado <= H - 1 ? [{ fecha: validado, estado: 'validado' as const, por: obra.administrador }] : [])],
+      ...extra,
+    })
+  }
+  for (const sc of d.subcontratos) {
+    const prov = d.proveedores.find((p) => p.id === sc.subcontratistaId)
+    const firma = sc.historial.find((h) => h.estado === 'en_acreditacion')?.fecha ?? sc.creado
+    const termino = sc.historial.find((h) => h.estado === 'terminado')?.fecha
+    // Trabajadores acreditados antes de entrar a la obra
+    const oficios = OFICIOS_DEMO[prov?.especialidad ?? ''] ?? ['Maestro', 'Ayudante']
+    const dotacion = 3 + (sc.numero % 3)
+    for (let k = 0; k < dotacion; k++) {
+      const id = `tr_${sc.id}_${k + 1}`
+      const ingreso = firma + 1
+      trabajadores.push({
+        id, obraId: sc.obraId, subcontratistaId: sc.subcontratistaId, rut: `${15 + ((sc.numero * 7 + k * 3) % 9)}.${String(100 + ((k * 37 + sc.numero * 11) % 900)).padStart(3, '0')}.${String(200 + k * 17).padStart(3, '0')}-${(k + sc.numero) % 10}`,
+        nombre: NOMBRES_DEMO[(sc.numero * 3 + k + sc.obraId.length) % NOMBRES_DEMO.length], oficio: oficios[Math.min(k, oficios.length - 1)], ingreso,
+        ...(termino != null ? { salida: termino + 3 } : {}),
+      })
+      for (const tipo of ['contrato', 'informacion_riesgos', 'epp'] as const) doc(sc, tipo, firma, firma + 1, { trabajadorId: id })
+    }
+    // F30 de ingreso y su renovación vigente
+    doc(sc, 'f30', firma - 1, firma, { vencimiento: firma + 30 })
+    // Se renueva antes de vencer (salvo el de Eléctrica Norte en el edificio, que queda por vencer)
+    if (termino == null && firma + 30 < H + 10) doc(sc, 'f30', Math.max(H - 12, firma + 1), Math.max(H - 11, firma + 2), { vencimiento: sc.codigo === 'SC-005' ? H + 3 : H + 18 })
+    // F30-1 de cada mes trabajado, cargado el 8 y validado el 10 del mes siguiente
+    const bloqueado = sc.codigo === 'SC-203' && sc.obraId === 'obra_bodegas'
+    const hasta = termino ?? H
+    for (let m = finDeMes(firma); m < hasta; m = finDeMes(m + 1)) {
+      const siguiente = m + 1
+      if (siguiente + 7 > H - 1) break
+      const per = iso(m).slice(0, 7)
+      const reciente = m >= finDeMes(finDeMes(hasta) - 62)
+      if (bloqueado && reciente) {
+        // Sin validar: el último está cargado y espera revisión
+        if (m === finDeMes(finDeMes(hasta) - 31)) doc(sc, 'f30_1', siguiente + 7, null, { periodo: per })
+        continue
+      }
+      doc(sc, 'f30_1', siguiente + 7, siguiente + 9, { periodo: per })
+    }
+  }
+  // Sin F30-1 vigente al momento del pago no hay pago (RULE-701): esos EP quedan aprobados
+  for (const ep of d.epsSubcontrato) {
+    const sc = d.subcontratos.find((s) => s.id === ep.subcontratoId)!
+    const pago = ep.historial.find((h) => h.estado === 'pagado')
+    if (pago && !f301Vigente(docs, sc.obraId, sc.subcontratistaId, ep.fechaCorte, pago.fecha)) ep.historial = ep.historial.filter((h) => h.estado !== 'pagado')
+  }
+  return { trabajadores, documentosLaborales: docs }
+}
+
 /**
  * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
  * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
@@ -1276,7 +1355,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 11
+export const VERSION_DEMO = 12
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1295,7 +1374,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1340,6 +1419,8 @@ function generar(hoyDia: Dia): Datos {
   d.movimientosStock = bodegaDemo(d, hoyDia)
   // Subcontratos y sus estados de pago (desde los compromisos SC-… y el avance validado)
   Object.assign(d, subcontratosDemo(d, hoyDia))
+  // Cumplimiento laboral: trabajadores, F30 y F30-1 de cada subcontratista
+  Object.assign(d, cumplimientoDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

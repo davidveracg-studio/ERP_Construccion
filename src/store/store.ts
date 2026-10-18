@@ -30,11 +30,12 @@ import {
   accionesEPSub, accionesSub, aplicarAccionEPSub, aplicarAccionSub, estadoEPSub, estadoSub, puPartida, puedeCrearSubcontrato, puedeEditarSubcontratistas,
   sugerirLineas, type AccionEPSub, type AccionSub,
 } from '../domain/subcontratos'
+import { acreditacion, f301Vigente, puedeCargarDocumentos, puedeRevisarDocumentos, subcontratistaDeR10 } from '../domain/cumplimiento'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral,
 } from '../domain/types'
 
 export interface UI {
@@ -50,6 +51,7 @@ export const USUARIOS: Record<Rol, string> = {
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
   R07: 'Patricia Lagos',
+  R10: 'Sergio Pizarro (Eléctrica Norte)',
   R11: 'ITO del mandante',
 }
 
@@ -157,6 +159,10 @@ export interface Acciones {
   crearEPSub: (subcontratoId: string, fechaCorte: number) => { id?: string; error?: string }
   editarEPSub: (id: string, cambios: Partial<Pick<EPSubcontrato, 'lineas' | 'descuentos'>>) => void
   accionEPSub: (id: string, accion: AccionEPSub, texto?: string) => string | null
+  registrarTrabajador: (w: Omit<Trabajador, 'id'>) => string | null
+  /** Carga (o recarga) un documento laboral: queda por revisar. */
+  cargarDocumento: (x: Pick<DocumentoLaboral, 'obraId' | 'subcontratistaId' | 'trabajadorId' | 'tipo' | 'periodo' | 'vencimiento' | 'archivo'>) => string | null
+  revisarDocumento: (id: string, resultado: 'validado' | 'rechazado', motivo?: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -815,6 +821,10 @@ export const useStore = create<Estado>()(
           const t = hoy()
           if (!accionesSub(sc, t, s.ui.rol, s.config).includes(accion))
             return accion === 'firmar' && s.ui.rol === 'R02' ? 'Supera el límite de 500 UF del administrador de obra: lo firma Gerencia (R01).' : 'Tu rol no puede hacer esta acción en este estado.'
+          if (accion === 'acreditar') {
+            const a = acreditacion(sc, s.trabajadores, s.documentosLaborales, t)
+            if (!a.ok) return `RULE-702: falta documentación de ingreso (F30 ${a.f30 === 'validado' || a.f30 === 'por_vencer' ? 'vigente' : 'no vigente'}; ${a.acreditados} de ${a.trabajadores} trabajadores acreditados).`
+          }
           try {
             let nuevo = aplicarAccionSub(sc, accion, { fecha: t, autor: s.ui.usuario, texto, eps: s.epsSubcontrato, rdos: s.rdos })
             // Al firmar, el saldo de cada partida queda comprometido (si no venía de un compromiso importado)
@@ -859,7 +869,8 @@ export const useStore = create<Estado>()(
           const s = getS()
           const sc = s.subcontratos.find((x) => x.id === subcontratoId)
           if (!sc) return { error: 'El subcontrato no existe.' }
-          if (s.ui.rol !== 'R02') return { error: 'El EP lo prepara el administrador de obra (o el subcontratista desde su portal).' }
+          const propio = s.ui.rol === 'R10' && subcontratistaDeR10(s.proveedores)?.id === sc.subcontratistaId
+          if (s.ui.rol !== 'R02' && !propio) return { error: 'El EP lo prepara el administrador de obra (o el subcontratista desde su portal).' }
           const t = hoy()
           if (fechaCorte > t) return { error: 'El corte no puede ser futuro.' }
           const lineas = sugerirLineas(sc, s.epsSubcontrato, s.rdos, fechaCorte, t)
@@ -878,6 +889,10 @@ export const useStore = create<Estado>()(
           if (!ep || !sc) return 'El estado de pago no existe.'
           const t = hoy()
           if (!accionesEPSub(ep, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en este estado.'
+          if (s.ui.rol === 'R10' && subcontratistaDeR10(s.proveedores)?.id !== sc.subcontratistaId) return 'Solo puedes presentar los EP de tus subcontratos.'
+          // RULE-701 se revisa también al pagar: la documentación puede vencer entre la aprobación y el pago
+          if (accion === 'pagar' && !f301Vigente(s.documentosLaborales, sc.obraId, sc.subcontratistaId, ep.fechaCorte, t))
+            return 'RULE-701: falta el F30-1 validado del período: el pago queda bloqueado hasta que se cargue y valide.'
           try {
             const nuevo = aplicarAccionEPSub(ep, accion, { fecha: t, autor: s.ui.usuario, texto, eps: s.epsSubcontrato, rdos: s.rdos, sc })
             // Al aprobarse, el EP es costo real de sus partidas (contra el compromiso del subcontrato)
@@ -893,6 +908,32 @@ export const useStore = create<Estado>()(
             return (e as Error).message
           }
         },
+        registrarTrabajador: (w) => {
+          const s = getS()
+          const propio = s.ui.rol === 'R10' && subcontratistaDeR10(s.proveedores)?.id === w.subcontratistaId
+          if (s.ui.rol !== 'R02' && !propio) return 'Registran trabajadores el administrador de obra o el propio subcontratista.'
+          if (!w.rut.trim() || !w.nombre.trim() || !w.oficio.trim()) return 'Indica RUT, nombre y oficio.'
+          if (s.trabajadores.some((x) => x.obraId === w.obraId && x.rut.replace(/\W/g, '') === w.rut.replace(/\W/g, '') && x.salida == null)) return 'Ese trabajador ya está registrado en la obra.'
+          mutar((x) => ({ trabajadores: [...x.trabajadores, { ...w, id: uid('tr'), rut: w.rut.trim(), nombre: w.nombre.trim(), oficio: w.oficio.trim() }] }))
+          return null
+        },
+        cargarDocumento: (doc) => {
+          const s = getS()
+          if (!puedeCargarDocumentos(s.ui.rol)) return 'Cargan documentos el subcontratista o el administrador de obra.'
+          if (s.ui.rol === 'R10' && subcontratistaDeR10(s.proveedores)?.id !== doc.subcontratistaId) return 'Solo puedes cargar documentos de tu empresa.'
+          if (doc.tipo === 'f30_1' && !doc.periodo) return 'Indica el mes del F30-1.'
+          const t = hoy()
+          mutar((x) => ({ documentosLaborales: [...x.documentosLaborales, { ...doc, id: uid('dl'), historial: [{ fecha: t, estado: 'cargado' as const, por: s.ui.usuario }], creado: t, creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        revisarDocumento: (id, resultado, motivo) => {
+          const s = getS()
+          if (!puedeRevisarDocumentos(s.ui.rol)) return 'Revisa la documentación el administrador de obra (o Prevención).'
+          if (resultado === 'rechazado' && !motivo?.trim()) return 'Indica el motivo del rechazo.'
+          const t = hoy()
+          mutar((x) => ({ documentosLaborales: x.documentosLaborales.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: resultado, por: s.ui.usuario, ...(motivo?.trim() ? { texto: motivo.trim() } : {}) }] } : y)) }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -900,7 +941,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 14,
+      version: 15,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

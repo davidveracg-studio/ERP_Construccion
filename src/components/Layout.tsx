@@ -41,6 +41,7 @@ const NAV: Item[] = [
   { to: '/compras', etiqueta: 'Compras y abastecimiento', roles: ['R01', 'R02', 'R03', 'R04', 'R05', 'R07'], icono: '⊞' },
   { to: '/bodega', etiqueta: 'Bodega de obra', roles: ['R01', 'R02', 'R03', 'R04', 'R05', 'R07'], icono: '▣' },
   { to: '/subcontratos', etiqueta: 'Subcontratos', roles: ['R01', 'R02', 'R03', 'R05'], icono: '⧉' },
+  { to: '/subcontratista', etiqueta: 'Portal subcontratista', roles: ['R10'], icono: '⌂' },
   { to: '/documentos', etiqueta: 'Planos, RFI y submittals', roles: ['R01', 'R02', 'R03', 'R05'], icono: '▭' },
   { to: '/libro-obra', etiqueta: 'Libro de Obra', roles: ['R01', 'R02', 'R03', 'R05', 'R11'], icono: '☰' },
   { to: '/mandante', etiqueta: 'Portal mandante', roles: ['R11', 'R02'], icono: '⌂' },
@@ -67,7 +68,7 @@ export function Layout() {
   const abiertas = alertas.filter((a) => a.obraId === ui.obraId && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
   const criticas = abiertas.filter((a) => a.severidad === 'critica' || a.severidad === 'alta').length
   const salir = useSesion((s) => s.salir)
-  const externo = ui.rol === 'R11'
+  const externo = ui.rol === 'R11' || ui.rol === 'R10'
   const items = NAV.filter((n) => n.roles.includes(ui.rol) && (obras.length > 0 || ['/nueva-obra', '/config'].includes(n.to)))
 
   return (
