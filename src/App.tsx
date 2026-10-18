@@ -20,6 +20,7 @@ import Documentos, { DetalleRFI, DetalleSubmittal } from './pages/Documentos'
 import LibroObra from './pages/LibroObra'
 import PlanSemanal from './pages/PlanSemanal'
 import Compras, { DetalleOC as DetalleOrdenCompra } from './pages/Compras'
+import Bodega from './pages/Bodega'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -98,6 +99,7 @@ function Rutas() {
               <Route path="plan-semanal" element={<PlanSemanal />} />
               <Route path="compras" element={<Compras />} />
               <Route path="compras/oc/:id" element={<DetalleOrdenCompra />} />
+              <Route path="bodega" element={<Bodega />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />

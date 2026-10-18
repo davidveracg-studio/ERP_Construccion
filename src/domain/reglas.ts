@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
 import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
 import { CAUSAS_CNC, indicadoresLP, PPC_ALERTA, PPC_ROJO, restriccionesAbiertas, restriccionUrgente, TIPOS_RESTRICCION } from './lastPlanner'
 import { DESTINATARIOS_RFI, folioPendiente, partidasCriticas, rfiVencido, terrenoDesactualizado, tocaCriticas, revisionVigente, TIPOS_FOLIO } from './documental'
@@ -43,6 +44,8 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-113': 'PPC semanal bajo meta',
   'RULE-114': 'Restricción sin liberar a 48 h del inicio',
   'RULE-110': 'Registro de HH inconsistente',
+  'RULE-201': 'Material requerido sin stock ni OC',
+  'RULE-202': 'Consumo de material sobre presupuesto',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-305': 'OTIF de proveedor bajo',
   'RULE-306': 'Compras urgentes sobre umbral',
@@ -428,6 +431,40 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       porQue: e === 'vencida' ? 'La garantía venció sin renovarse: puede ser causal de incumplimiento del contrato.' : `La garantía vence en ${g.vencimiento - c.corte} días.`,
       accionRequerida: 'Solicitar la renovación al banco o aseguradora y entregarla al mandante antes del vencimiento.',
       responsable: o.administrador,
+    })
+  }
+
+  // Bodega (v1.2): RULE-201 material de las tareas por iniciar sin stock ni OC, RULE-202 consumo sobre presupuesto
+  const partCriticas201 = partidasCriticas(c)
+  for (const f of faltantes(d, o.id, c.corte)) {
+    const critica = f.tareas.some((x) => x.partidaId && partCriticas201.has(x.partidaId))
+    out.push({
+      regla: 'RULE-201', clave: `RULE-201|${f.material.id}`, severidad: f.critico && critica ? 'alta' : 'media',
+      titulo: `Sin cobertura de ${f.material.nombre} para las tareas de los próximos ${DIAS_COBERTURA} días`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Requerido', valor: `${num(f.requerido, 1)} ${f.material.unidad}` },
+        { etiqueta: 'Stock + en compra', valor: `${num(f.stock, 1)} + ${num(f.enCompra, 1)} ${f.material.unidad}` },
+        { etiqueta: 'Tareas', valor: f.tareas.map((x) => x.descripcion).join(' · ') },
+      ],
+      porQue: 'Las tareas del plan semanal que parten pronto necesitan más material del que hay en bodega y en órdenes en curso.',
+      queProvoca: 'Sin material la cuadrilla queda detenida y la compra termina siendo urgente.',
+      accionRequerida: 'Emitir la OC al proveedor habitual o traspasar stock desde otra obra; registrar la restricción en la tarea.',
+      responsable: o.administrador,
+    })
+  }
+  for (const x of controlMateriales(d, c, c.corte)) {
+    if (x.desvio == null || x.desvio <= TOLERANCIA_CONSUMO || x.consumido <= 0) continue
+    out.push({
+      regla: 'RULE-202', clave: `RULE-202|${x.partida.id}`, severidad: 'media', titulo: `Consumo de ${x.material.nombre} sobre lo presupuestado: ${x.partida.codigo} ${x.partida.descripcion}`, entidad: o.nombre,
+      datos: [
+        { etiqueta: 'Consumido', valor: `${num(x.consumido, 1)} ${x.material.unidad}` },
+        { etiqueta: 'Presupuestado según avance', valor: `${num(x.segunAvance, 1)} ${x.material.unidad}` },
+        { etiqueta: 'Desviación', valor: signoPct(x.desvio) },
+      ],
+      porQue: `Se ha consumido ${signoPct(x.desvio)} más material del que corresponde al avance de la partida.`,
+      queProvoca: 'Pérdidas, mermas no registradas o un rendimiento de material peor que el presupuestado.',
+      accionRequerida: 'Revisar mermas y despachos en bodega, y el rendimiento real del material en terreno.',
+      responsable: o.jefeTerreno,
     })
   }
 
