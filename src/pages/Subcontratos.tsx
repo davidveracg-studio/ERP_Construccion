@@ -10,20 +10,18 @@ import { clp, mm, num, pct } from '../domain/formato'
 import {
   ACCIONES_EPSUB, ACCIONES_SUB, accionesEPSub, accionesSub, ADICIONALES_AMBAR, ADICIONALES_ROJO, avanceValidado, cobradoPartida, epsDe, estadoEPSub,
   estadoSub, ESTADOS_EPSUB, ESTADOS_SUB, excesosRULE703, indicadoresSub, limiteSubcontrato, montosEPSub, pesoSubcontratos, puedeCrearSubcontrato,
-  puedeEditarSubcontratistas, requiereGerenciaSub, TONO_EPSUB, TONO_SUB, type AccionEPSub, type AccionSub,
+  puedeEditarSubcontratistas, requiereGerenciaSub, TONO_SUB, type AccionEPSub, type AccionSub,
 } from '../domain/subcontratos'
 import type { AjusteSubcontrato, EPSubcontrato, Proveedor, Subcontrato } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
+import { acreditacion, estadoEPConDocs, indicadoresCumplimiento, periodo, periodoAnterior } from '../domain/cumplimiento'
+import { DocumentacionLaboral, EstadoEPDocsBadge } from './Cumplimiento'
 import { useStore } from '../store/store'
 
 const q = (n: number) => num(n, Math.abs(n % 1) > 0.0001 ? 2 : 0)
 export function EstadoSubBadge({ sc, t }: { sc: Subcontrato; t: number }) {
   const e = estadoSub(sc, t)
   return e ? <Badge tono={TONO_SUB[e]}>{ESTADOS_SUB[e]}</Badge> : null
-}
-function EstadoEPBadge({ ep, t }: { ep: EPSubcontrato; t: number }) {
-  const e = estadoEPSub(ep, t)
-  return e ? <Badge tono={TONO_EPSUB[e]}>{ESTADOS_EPSUB[e]}</Badge> : null
 }
 
 export default function Subcontratos() {
@@ -40,6 +38,7 @@ export default function Subcontratos() {
   const peso = pesoSubcontratos(c)
   const original = suma((i) => i.original)
   const adic = original ? suma((i) => i.adicionales) / original : null
+  const cum = indicadoresCumplimiento(d, c.obra.id, t)
 
   return (
     <div className="space-y-4">
@@ -47,7 +46,10 @@ export default function Subcontratos() {
         accion={puedeCrearSubcontrato(rol) ? <Boton onClick={() => setNuevo(true)}>Nuevo subcontrato</Boton> : undefined}>
         Subcontratos
       </Titulo>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi etiqueta="Cumplimiento documental" valor={cum.alDia != null ? pct(cum.alDia, 0) : '—'} sub={`KSU-01 · ${cum.porRevisar} documento(s) por revisar`} estado={cum.alDia == null ? undefined : cum.alDia >= 1 ? 'verde' : cum.alDia >= 0.8 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="EP bloqueados" valor={cum.bloqueados} sub="KSU-02 · RULE-701, falta F30-1" estado={cum.bloqueados ? 'amarillo' : 'verde'} />
+        <Kpi etiqueta="Documentos por vencer" valor={cum.porVencer} sub="F30 y documentos de trabajadores" estado={cum.porVencer ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Monto vigente" valor={mm(suma((i) => i.vigente))} sub={`${lista.length} subcontratos`} />
         <Kpi etiqueta="Pagado" valor={mm(suma((i) => i.pagado))} sub={`aprobado ${mm(suma((i) => i.aprobado))}`} />
         <Kpi etiqueta="Saldo contractual" valor={mm(suma((i) => i.saldo))} sub="KSU-05 · es compromiso" />
@@ -228,6 +230,7 @@ export function DetalleSubcontrato() {
       </Titulo>
       <Link to="/subcontratos" className="text-sm text-marca">← Subcontratos</Link>
       {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{error}</p>}
+      {e === 'en_acreditacion' && !acreditacion(sc, d.trabajadores, d.documentosLaborales, t).ok && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">RULE-702: para acreditar se necesita el F30 vigente y los trabajadores con contrato, información de riesgos y EPP validados.</p>}
       {e === 'borrador' && requiereGerenciaSub(sc, d.config) && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Supera {clp(limiteSubcontrato(d.config))} (RN-P04): lo firma Gerencia (R01).</p>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Kpi etiqueta="Monto vigente" valor={mm(i.vigente)} sub={`original ${mm(i.original)}`} />
@@ -272,7 +275,7 @@ export function DetalleSubcontrato() {
                     return (
                       <tr key={x.id} className="border-b border-slate-100 text-right">
                         <td className="py-2 text-left">N° {x.numero} · corte {fmtFecha(x.fechaCorte)}</td><td>{mm(m.bruto)}</td><td>{mm(m.retencion)}</td><td>{m.descuentos ? mm(m.descuentos) : '—'}</td><td className="font-medium">{mm(m.neto)}</td>
-                        <td className="text-left"><EstadoEPBadge ep={x} t={t} /></td>
+                        <td className="text-left"><EstadoEPDocsBadge ep={x} sc={sc} /></td>
                         <td><button className="text-marca hover:underline" onClick={() => setEpSel(x.id)}>Ver</button></td>
                       </tr>
                     )
@@ -296,6 +299,7 @@ export function DetalleSubcontrato() {
           </ol>
         </Card>
       </div>
+      <DocumentacionLaboral sc={sc} />
       {accion && <AccionSubModal sc={sc} accion={accion} onCerrar={() => setAccion(null)} />}
       {ajuste && <AjusteModal sc={sc} onCerrar={() => setAjuste(false)} />}
       {sel && <DetalleEPSub ep={sel} sc={sc} onCerrar={() => setEpSel(null)} />}
@@ -360,12 +364,14 @@ function DetalleEPSub({ ep, sc, onCerrar }: { ep: EPSubcontrato; sc: Subcontrato
   const e = estadoEPSub(ep, t)!
   const m = montosEPSub(ep, sc)
   const excesos = excesosRULE703(ep, d.epsSubcontrato, d.rdos, t)
-  const acciones = accionesEPSub(ep, t, rol)
+  // RULE-701: bloqueado por F30-1 no se puede pagar
+  const acciones = accionesEPSub(ep, t, rol).filter((x) => !(x === 'pagar' && estadoEPConDocs(ep, sc, d.documentosLaborales, t) === 'bloqueado'))
   const editable = e === 'borrador' && rol === 'R02'
   return (
     <Modal abierto titulo={`EP N° ${ep.numero} · ${sc.codigo} · corte ${fmtFecha(ep.fechaCorte)}`} onCerrar={onCerrar}>
       <div className="space-y-3 text-sm">
-        <div className="flex items-center gap-2"><EstadoEPBadge ep={ep} t={t} />{e === 'aprobado' && <span className="text-xs text-slate-500">Aprobado: es costo real de la partida.</span>}</div>
+        <div className="flex items-center gap-2"><EstadoEPDocsBadge ep={ep} sc={sc} />{e === 'aprobado' && <span className="text-xs text-slate-500">Aprobado: es costo real de la partida.</span>}</div>
+        {estadoEPConDocs(ep, sc, d.documentosLaborales, t) === 'bloqueado' && <p className="rounded-lg bg-red-50 p-2 text-red-900">RULE-701: falta el F30-1 validado de {periodo(ep.fechaCorte)} o {periodoAnterior(periodo(ep.fechaCorte))}. El pago queda bloqueado hasta que el subcontratista lo cargue y se valide.</p>}
         {excesos.length > 0 && ['borrador', 'presentado'].includes(e) && <p className="rounded-lg bg-red-50 p-2 text-red-900">RULE-703: se cobra más que el avance validado ({excesos.map((x) => `exceso ${q(x.exceso)}`).join(', ')}). No se puede validar.</p>}
         <table className="tabular w-full text-right">
           <thead><tr className="border-b border-slate-200 text-xs text-slate-500"><th className="py-1 text-left font-medium">Partida</th><th className="font-medium">Cantidad</th><th className="font-medium">Monto</th></tr></thead>

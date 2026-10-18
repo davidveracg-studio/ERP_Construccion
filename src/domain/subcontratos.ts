@@ -151,7 +151,7 @@ export function aplicarAccionSub(
 export type AccionEPSub = 'presentar' | 'validar' | 'rechazar' | 'aprobar' | 'pagar'
 export const ACCIONES_EPSUB: Record<AccionEPSub, string> = { presentar: 'Presentar', validar: 'Validar cantidades', rechazar: 'Rechazar', aprobar: 'Aprobar', pagar: 'Registrar pago' }
 const PERMISOS_EP: Partial<Record<EstadoEPSub, Partial<Record<AccionEPSub, Rol[]>>>> = {
-  borrador: { presentar: ['R02'] },
+  borrador: { presentar: ['R02', 'R10'] },
   presentado: { validar: ['R03'], rechazar: ['R03', 'R02'] },
   validado: { aprobar: ['R02'], rechazar: ['R02'] },
   // El pago lo registra Finanzas (R09); mientras no exista el rol, el administrador o Gerencia

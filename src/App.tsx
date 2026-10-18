@@ -22,6 +22,7 @@ import PlanSemanal from './pages/PlanSemanal'
 import Compras, { DetalleOC as DetalleOrdenCompra } from './pages/Compras'
 import Bodega from './pages/Bodega'
 import Subcontratos, { DetalleSubcontrato } from './pages/Subcontratos'
+import PortalSubcontratista from './pages/Cumplimiento'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -38,7 +39,7 @@ import { useStore } from './store/store'
 // three.js pesa: la simulación 4D se carga solo al abrirla
 const Obra4D = lazy(() => import('./pages/Obra4D'))
 
-const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos', R07: '/compras', R11: '/mandante' } as const
+const INICIO = { R01: '/cartera', R02: '/obra', R03: '/terreno', R04: '/rdo', R05: '/costos', R07: '/compras', R10: '/subcontratista', R11: '/mandante' } as const
 
 function Inicio() {
   const rol = useStore((s) => s.ui.rol)
@@ -49,6 +50,8 @@ function Rutas() {
   const sinObras = useStore((s) => s.obras.length === 0)
   // El mandante/ITO (externo) solo ve su portal: nunca costos, márgenes ni alertas internas (19 §5)
   const mandante = useStore((s) => s.ui.rol === 'R11')
+  // El subcontratista (externo) solo ve su portal: sus subcontratos, documentos y EP (19 §5)
+  const subcontratista = useStore((s) => s.ui.rol === 'R10')
   return (
     <HashRouter>
       <Routes>
@@ -60,6 +63,12 @@ function Rutas() {
               <Route path="nueva-obra" element={<NuevaObra />} />
               <Route path="config" element={<Configuracion />} />
               <Route path="*" element={<Navigate to="/" replace />} />
+            </>
+          ) : subcontratista ? (
+            <>
+              <Route index element={<Inicio />} />
+              <Route path="subcontratista" element={<PortalSubcontratista />} />
+              <Route path="*" element={<Navigate to="/subcontratista" replace />} />
             </>
           ) : mandante ? (
             <>
