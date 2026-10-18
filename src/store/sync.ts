@@ -22,7 +22,7 @@ export const TABLA: Record<Coleccion, string> = {
   estadosPago: 'estados_pago', ordenesCambio: 'ordenes_cambio', obligaciones: 'obligaciones', garantias: 'garantias',
   recepciones: 'recepciones', riesgos: 'riesgos',
   documentos: 'documentos', rfis: 'rfis', submittals: 'submittals', folios: 'folios', tareasSemanales: 'tareas_semanales',
-  proveedores: 'proveedores', materiales: 'materiales', solicitudesMaterial: 'solicitudes_material', ordenesCompra: 'ordenes_compra',
+  proveedores: 'proveedores', materiales: 'materiales', solicitudesMaterial: 'solicitudes_material', ordenesCompra: 'ordenes_compra', movimientosStock: 'movimientos_stock',
 }
 
 export type EstadoSync = 'inactivo' | 'sincronizando' | 'al_dia' | 'pendiente' | 'sin_conexion' | 'error'

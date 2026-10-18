@@ -25,11 +25,12 @@ import {
   accionesOC as accionesCompra, aplicarAccionOC as aplicarAccionCompra, codigoOC, estadoOC as estadoCompra, puedeComprar, puedeEditarCatalogo,
   puedeEditarProveedores, puedeRechazarSolicitud, puedeRecibir, puedeSolicitar, registrarRecepcion, type AccionOC as AccionCompra,
 } from '../domain/compras'
+import { puedeMoverStock, stockMaterial, validarSalida } from '../domain/bodega'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento,
 } from '../domain/types'
 
 export interface UI {
@@ -138,6 +139,10 @@ export interface Acciones {
   accionOrdenCompra: (id: string, accion: AccionCompra, texto?: string) => string | null
   /** Recepción con guía: suma la cantidad recibida y genera el costo real de cada línea. */
   recibirOrdenCompra: (id: string, r: { guia: string; cantidades: Record<string, number> }) => string | null
+  /** Salida a partida, merma, ajuste o traspaso a otra obra (la entrada en destino se registra sola). */
+  registrarMovimiento: (m: { obraId: string; materialId: string; tipo: Exclude<TipoMovimiento, 'entrada'>; cantidad: number; partidaId?: string; obraDestinoId?: string; motivo?: string }) => string | null
+  /** Atiende una solicitud de terreno con stock de la bodega de obra. */
+  despacharSolicitud: (id: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -713,11 +718,54 @@ export const useStore = create<Estado>()(
                 descripcion: `${mat?.nombre ?? 'Material'} (${codigoOC(oc)})`, proveedor: prov?.nombre, documento: `${codigoOC(oc)} · guía ${rec.guia}`, origen: 'recepcion' as const,
               }
             })
-            mutar((x) => ({ ordenesCompra: x.ordenesCompra.map((y) => (y.id === id ? nueva : y)), costos: [...x.costos, ...costos] }))
+            const entradas: MovimientoStock[] = Object.entries(rec.cantidades).map(([lid, q]) => {
+              const l = oc.lineas.find((x) => x.id === lid)!
+              return { id: uid('mv'), obraId: oc.obraId, materialId: l.materialId, fecha: t, tipo: 'entrada', cantidad: q, costoUnitario: l.precio, ordenCompraId: oc.id, recepcionId: rec.id, motivo: `${codigoOC(oc)} · guía ${rec.guia}`, autor: s.ui.usuario }
+            })
+            mutar((x) => ({ ordenesCompra: x.ordenesCompra.map((y) => (y.id === id ? nueva : y)), costos: [...x.costos, ...costos], movimientosStock: [...x.movimientosStock, ...entradas] }))
             return null
           } catch (e) {
             return (e as Error).message
           }
+        },
+        registrarMovimiento: (m) => {
+          const s = getS()
+          if (!puedeMoverStock(s.ui.rol)) return 'Los movimientos de bodega los registra Bodega y Adquisiciones.'
+          if (m.tipo === 'ajuste' ? m.cantidad === 0 : !(m.cantidad > 0)) return 'Indica la cantidad.'
+          if (m.tipo === 'salida' && !m.partidaId) return 'Indica la partida que consume el material.'
+          if ((m.tipo === 'merma' || m.tipo === 'ajuste') && !m.motivo?.trim()) return 'Indica el motivo.'
+          if (m.tipo === 'traspaso' && (!m.obraDestinoId || m.obraDestinoId === m.obraId)) return 'Elige la obra de destino.'
+          const t = hoy()
+          const sale = m.tipo === 'ajuste' ? Math.max(0, -m.cantidad) : m.cantidad
+          if (sale > 0) {
+            const err = validarSalida(s.movimientosStock, m.obraId, m.materialId, sale, t, s.obras.map((o) => o.id).filter((o) => o !== m.obraId))
+            if (err) return err
+          }
+          const mov: MovimientoStock = { ...m, id: uid('mv'), fecha: t, motivo: m.motivo?.trim() || undefined, autor: s.ui.usuario }
+          const nuevos = [mov]
+          if (m.tipo === 'traspaso') {
+            const origen = s.obras.find((o) => o.id === m.obraId)
+            nuevos.push({
+              id: uid('mv'), obraId: m.obraDestinoId!, materialId: m.materialId, fecha: t, tipo: 'entrada', cantidad: m.cantidad,
+              costoUnitario: stockMaterial(s.movimientosStock, m.obraId, m.materialId, t).costoPromedio, motivo: `Traspaso desde ${origen?.nombre ?? 'otra obra'}`, autor: s.ui.usuario,
+            })
+          }
+          mutar((x) => ({ movimientosStock: [...x.movimientosStock, ...nuevos] }))
+          return null
+        },
+        despacharSolicitud: (id) => {
+          const s = getS()
+          const sol = s.solicitudesMaterial.find((x) => x.id === id)
+          if (!sol) return 'La solicitud no existe.'
+          if (!puedeMoverStock(s.ui.rol)) return 'Despacha Bodega y Adquisiciones.'
+          const t = hoy()
+          const err = validarSalida(s.movimientosStock, sol.obraId, sol.materialId, sol.cantidad, t, s.obras.map((o) => o.id).filter((o) => o !== sol.obraId))
+          if (err) return err
+          mutar((x) => ({
+            movimientosStock: [...x.movimientosStock, { id: uid('mv'), obraId: sol.obraId, materialId: sol.materialId, fecha: t, tipo: 'salida', cantidad: sol.cantidad, partidaId: sol.partidaId, solicitudId: sol.id, motivo: `Solicitud N° ${sol.numero}`, autor: s.ui.usuario }],
+            solicitudesMaterial: x.solicitudesMaterial.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'atendida_bodega' as const, por: s.ui.usuario }] } : y)),
+          }))
+          return null
         },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
@@ -726,7 +774,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 12,
+      version: 13,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

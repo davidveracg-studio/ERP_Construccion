@@ -10,6 +10,7 @@ import {
   puedeEditarProveedores, puedeRechazarSolicitud, puedeRecibir, puedeSolicitar, recibidoLinea, requiereGerencia, TONO_OC, TONO_SOLICITUD,
   umbralCotizaciones, type AccionOC,
 } from '../domain/compras'
+import { puedeMoverStock, stockMaterial } from '../domain/bodega'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { clp, mm, num, pct } from '../domain/formato'
 import type { Material, OrdenCompra, Proveedor, SolicitudMaterial, Urgencia } from '../domain/types'
@@ -65,6 +66,8 @@ export default function Compras() {
 function Solicitudes({ obraId, rol }: { obraId: string; rol: string }) {
   const d = useDatosDominio()
   const rechazar = useStore((s) => s.rechazarSolicitud)
+  const despachar = useStore((s) => s.despacharSolicitud)
+  const [errorDespacho, setErrorDespacho] = useState<string | null>(null)
   const [nueva, setNueva] = useState(false)
   const [oc, setOc] = useState(false)
   const [rechazo, setRechazo] = useState<SolicitudMaterial | null>(null)
@@ -78,6 +81,7 @@ function Solicitudes({ obraId, rol }: { obraId: string; rol: string }) {
       {puedeComprar(rol as never) && pendientes.length > 0 && <Boton variante="secundario" onClick={() => setOc(true)}>Generar OC ({pendientes.length})</Boton>}
       {puedeSolicitar(rol as never) && <Boton variante="secundario" onClick={() => setNueva(true)}>Nueva solicitud</Boton>}
     </span>}>
+      {errorDespacho && <p className="mb-2 text-sm text-crit">{errorDespacho}</p>}
       {lista.length === 0 ? <Vacio titulo="Sin solicitudes" texto="Terreno pide aquí el material con su partida y fecha requerida." /> : (
         <div className="overflow-x-auto">
           <table className="tabular w-full min-w-[760px] text-sm [&_td+td]:whitespace-nowrap [&_td+td]:pl-3 [&_th+th]:pl-3">
@@ -101,7 +105,7 @@ function Solicitudes({ obraId, rol }: { obraId: string; rol: string }) {
                     <td>{p?.codigo} {p?.descripcion}</td>
                     <td className={cx(e === 'enviada' && s.fechaRequerida - t <= 3 && 'font-medium text-amber-700')}>{fmtFecha(s.fechaRequerida)}</td>
                     <td><Badge tono={TONO_SOLICITUD[e]}>{ESTADOS_SOLICITUD[e]}</Badge>{orden && <Link to={`/compras/oc/${orden.id}`} className="ml-2 text-xs text-marca hover:underline">{codigoOC(orden)}</Link>}{motivo && <div className="max-w-[220px] truncate text-xs text-slate-500" title={motivo}>{motivo}</div>}</td>
-                    <td className="text-right">{e === 'enviada' && puedeRechazarSolicitud(rol as never) && <button className="text-xs text-slate-500 hover:text-crit" onClick={() => { setRechazo(s); setMotivo(''); setErrorRechazo(null) }}>Rechazar</button>}</td>
+                    <td className="text-right"><span className="flex justify-end gap-3">{e === 'enviada' && puedeMoverStock(rol as never) && stockMaterial(d.movimientosStock, obraId, s.materialId, t).cantidad >= s.cantidad && <button className="text-xs text-marca hover:underline" onClick={() => setErrorDespacho(despachar(s.id))}>Despachar desde bodega</button>}{e === 'enviada' && puedeRechazarSolicitud(rol as never) && <button className="text-xs text-slate-500 hover:text-crit" onClick={() => { setRechazo(s); setMotivo(''); setErrorRechazo(null) }}>Rechazar</button>}</span></td>
                   </tr>
                 )
               })}

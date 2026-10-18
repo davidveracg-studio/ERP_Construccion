@@ -14,7 +14,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock,
 } from './types'
 
 function rng(seed: number) {
@@ -566,18 +566,24 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
   const paso = <E extends string>(fecha: Dia, estado: E, por: string) => ({ fecha, estado, por })
   for (const obra of d.obras) {
     const semanas: number[] = []
-    for (let k = 13; k >= 1; k--) semanas.push(lunesHoy - 7 * k)
+    // Toda la vida de la obra, incluida la semana en curso (con lo consumido la semana anterior como pronóstico)
+    for (let k = 26; k >= 0; k--) semanas.push(lunesHoy - 7 * k)
     let nSol = 0
     let k = 0
-    let hormigones = 0
+    let moldajes = 0
+    // Las partidas con contrato marco de material (compromiso importado) se abastecen contra ese contrato
+    const marco = new Set(d.compromisos.filter((x) => x.obraId === obra.id && x.tipo === 'MAT').map((x) => x.partidaId))
     for (const L of semanas) {
       for (const p of d.partidas.filter((x) => x.obraId === obra.id)) {
         const rec = p.recursos.find((r) => r.tipo === 'MAT')
         const mat = rec && MATERIALES_DEMO.find((m) => m.recurso === rec.descripcion)
-        if (!rec || !mat) continue
-        const avance = d.rdos.filter((r) => r.obraId === obra.id && r.fecha >= L && r.fecha <= L + 6).reduce((s, r) => s + r.avances.filter((a) => a.partidaId === p.id).reduce((x, a) => x + a.cantidad, 0), 0)
-        const cantidad = Math.round(avance * rec.cantPorUnidad)
-        if (cantidad < 1 || L - 6 < obra.fechaInicio - 7) continue
+        if (!rec || !mat || marco.has(p.id)) continue
+        const desde = L === lunesHoy ? L - 7 : L
+        const avance = d.rdos.filter((r) => r.obraId === obra.id && r.fecha >= desde && r.fecha <= desde + 6).reduce((s, r) => s + r.avances.filter((a) => a.partidaId === p.id).reduce((x, a) => x + a.cantidad, 0), 0)
+        const hecho = L === lunesHoy ? d.rdos.filter((r) => r.obraId === obra.id && r.estado === 'validado').reduce((s, r) => s + r.avances.filter((a) => a.partidaId === p.id).reduce((x, a) => x + a.cantidad, 0), 0) : 0
+        // La de la semana en curso cubre también la próxima (sin pasar lo que queda de la partida)
+        const cantidad = L === lunesHoy ? Math.ceil(Math.min(2 * avance, Math.max(0, p.cantidad - hecho) + avance) * rec.cantPorUnidad) : Math.ceil(avance * rec.cantPorUnidad)
+        if (cantidad < 1 || L < obra.fechaInicio - 7 || (L === lunesHoy && obra.estado !== 'en_ejecucion')) continue
         k++
         numero++
         const id = `oc_${obra.id}_${numero}`
@@ -591,8 +597,8 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
           })
         }
         // Una entrega con atraso, del proveedor con más OC (no baja su OTIF de 90 días del mínimo)
-        if (mat.proveedor === 'prov_hormigones') hormigones++
-        const atrasada = obra.id === 'obra_aromos' && mat.proveedor === 'prov_hormigones' && hormigones === 6
+        if (mat.proveedor === 'prov_moldajes') moldajes++
+        const atrasada = obra.id === 'obra_aromos' && mat.proveedor === 'prov_moldajes' && moldajes === 8
         const enDos = obra.id === 'obra_aromos' && k === 4
         const linea = { id: 'l1', materialId: mat.id, cantidad, precio: precioVar(rec.precio, k), partidaId: p.id, ...(conSolicitud ? { solicitudId: solId } : {}) }
         const mitad = Math.round(cantidad / 2)
@@ -600,8 +606,8 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
           id, obraId: obra.id, numero, proveedorId: mat.proveedor, lineas: [linea], fechaEntrega: L - 1, urgente: k % 11 === 0, cotizaciones: 3,
           historial: [paso(L - 5, 'por_aprobar' as const, bodeguero), paso(L - 4, 'aprobada' as const, obra.administrador), paso(L - 4, 'enviada' as const, bodeguero)],
           recepciones: enDos
-            ? [{ id: 'r1', fecha: L - 3, guia: `${40_000 + numero}`, cantidades: { l1: mitad }, recibidoPor: bodeguero }, { id: 'r2', fecha: L - 1, guia: `${40_500 + numero}`, cantidades: { l1: cantidad - mitad }, recibidoPor: bodeguero }]
-            : [{ id: 'r1', fecha: atrasada ? L + 1 : L - 2, guia: `${40_000 + numero}`, cantidades: { l1: cantidad }, recibidoPor: bodeguero }],
+            ? [{ id: 'r1', fecha: L - 4, guia: `${40_000 + numero}`, cantidades: { l1: mitad }, recibidoPor: bodeguero }, { id: 'r2', fecha: L - 3, guia: `${40_500 + numero}`, cantidades: { l1: cantidad - mitad }, recibidoPor: bodeguero }]
+            : [{ id: 'r1', fecha: atrasada ? L + 1 : L - 3, guia: `${40_000 + numero}`, cantidades: { l1: cantidad }, recibidoPor: bodeguero }],
           creado: L - 5, creadoPor: bodeguero,
         })
       }
@@ -622,7 +628,7 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
   curso('obra_aromos', 1301, 'mat_moldaje', '3.4', 1700, [paso(hoyDia - 4, 'por_aprobar', bodeguero), paso(hoyDia - 3, 'aprobada', aromos.administrador), paso(hoyDia - 3, 'enviada', bodeguero)], hoyDia + 3)
   curso('obra_aromos', 1302, 'mat_ceramico', '5.2', 300, [paso(hoyDia - 2, 'por_aprobar', bodeguero), paso(hoyDia - 1, 'aprobada', aromos.administrador)], hoyDia + 8)
   curso('obra_aromos', 1303, 'mat_ladrillo', '4.1', 600, [paso(hoyDia - 1, 'por_aprobar', bodeguero)], hoyDia + 6)
-  curso('obra_clinica', 1304, 'mat_cielo', '2.2', 150, [paso(hoyDia - 3, 'por_aprobar', bodeguero), paso(hoyDia - 2, 'aprobada', clinica.administrador), paso(hoyDia - 2, 'enviada', bodeguero)], hoyDia + 2)
+  curso('obra_clinica', 1304, 'mat_cielo', '2.2', 250, [paso(hoyDia - 3, 'por_aprobar', bodeguero), paso(hoyDia - 2, 'aprobada', clinica.administrador), paso(hoyDia - 2, 'enviada', bodeguero)], hoyDia + 2)
   const sol = (obraId: string, materialId: string, partidaCod: string, cantidad: number, requerida: Dia, extra: Partial<SolicitudMaterial> = {}) => {
     const obra = d.obras.find((o) => o.id === obraId)!
     const numeroSol = solicitudes.filter((s) => s.obraId === obraId).length + 1
@@ -636,6 +642,57 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
   sol('obra_clinica', 'mat_perfiles', '2.1', 60, hoyDia + 10)
   solicitudes.at(-2)!.historial[0] = { ...solicitudes.at(-2)!.historial[0], texto: 'Hay stock de EPP en bodega central; se despacha desde allá.' }
   return { solicitudesMaterial: solicitudes, ordenesCompra: ordenes }
+}
+
+/**
+ * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
+ * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
+ */
+function bodegaDemo(d: Datos, hoyDia: Dia): MovimientoStock[] {
+  const out: MovimientoStock[] = []
+  let n = 0
+  const id = () => `mv_${++n}`
+  for (const obra of d.obras) {
+    const ocs = d.ordenesCompra.filter((o) => o.obraId === obra.id)
+    const materialDe = new Map<string, string>()
+    for (const oc of ocs) for (const l of oc.lineas) materialDe.set(l.partidaId, l.materialId)
+    const materiales = [...new Set(materialDe.values())]
+    for (const matId of materiales) {
+      const partidas = [...materialDe].filter(([, m]) => m === matId).map(([pid]) => d.partidas.find((p) => p.id === pid)!).filter((p) => p.recursos.some((r) => r.tipo === 'MAT'))
+      const entradas = ocs.flatMap((oc) => oc.recepciones.filter((r) => r.fecha <= hoyDia - 1).flatMap((r) => oc.lineas.filter((l) => l.materialId === matId && r.cantidades[l.id]).map((l) => ({ oc, r, l, q: r.cantidades[l.id] }))))
+      const consumos = new Map<string, number>()
+      // Solo RDO validados: es lo que cuenta como avance de la partida
+      for (const r of d.rdos.filter((x) => x.obraId === obra.id && x.estado === 'validado')) {
+        for (const a of r.avances) {
+          const p = partidas.find((x) => x.id === a.partidaId)
+          if (p) consumos.set(`${r.fecha}|${p.id}`, (consumos.get(`${r.fecha}|${p.id}`) ?? 0) + a.cantidad * p.recursos.find((x) => x.tipo === 'MAT')!.cantPorUnidad)
+        }
+      }
+      const dias = [...new Set([...entradas.map((e) => e.r.fecha), ...[...consumos.keys()].map((k) => Number(k.split('|')[0]))])].sort((a, b) => a - b)
+      let stock = 0
+      const pendiente = new Map<string, number>()
+      for (const dia of dias) {
+        for (const e of entradas.filter((x) => x.r.fecha === dia)) {
+          out.push({ id: id(), obraId: obra.id, materialId: matId, fecha: dia, tipo: 'entrada', cantidad: e.q, costoUnitario: e.l.precio, ordenCompraId: e.oc.id, recepcionId: e.r.id, motivo: `OC-${String(e.oc.numero).padStart(4, '0')} · guía ${e.r.guia}`, autor: USUARIO_R07 })
+          stock += e.q
+        }
+        for (const p of partidas) {
+          const quiere = (pendiente.get(p.id) ?? 0) + (consumos.get(`${dia}|${p.id}`) ?? 0)
+          const sale = Math.floor(Math.min(quiere, stock) * 100) / 100
+          if (sale >= 0.01) {
+            out.push({ id: id(), obraId: obra.id, materialId: matId, fecha: dia, tipo: 'salida', cantidad: sale, partidaId: p.id, autor: USUARIO_R07 })
+            stock = Math.round((stock - sale) * 100) / 100
+          }
+          pendiente.set(p.id, quiere - sale)
+        }
+      }
+    }
+  }
+  // Una merma registrada: cerámicos quebrados en la descarga
+  const ceramico = 'mat_ceramico'
+  const disponible = out.filter((m) => m.obraId === 'obra_aromos' && m.materialId === ceramico && m.fecha <= hoyDia - 2).reduce((s, m) => s + (m.tipo === 'entrada' ? m.cantidad : -m.cantidad), 0)
+  if (disponible >= 4) out.push({ id: id(), obraId: 'obra_aromos', materialId: ceramico, fecha: hoyDia - 2, tipo: 'merma', cantidad: 4, motivo: 'Cajas de cerámico quebradas en la descarga', autor: USUARIO_R07 })
+  return out
 }
 
 /**
@@ -702,9 +759,19 @@ function lastPlannerDemo(d: Datos, hoyDia: Dia): TareaSemanal[] {
     }
     // Semana en curso (si no terminó) y la siguiente, con las mismas cuadrillas y partidas
     const actual = hoyDia >= lunesHoy + 5 ? lunesHoy + 7 : lunesHoy
+    // Saldo por ejecutar de cada partida (avance validado), para no planificar más de lo que queda
+    const saldo = new Map<string, number>()
+    for (const x of ultimas) {
+      if (saldo.has(x.pid)) continue
+      const hecho = d.rdos.filter((r) => r.obraId === obra.id && r.estado === 'validado').reduce((s, r) => s + r.avances.filter((a) => a.partidaId === x.pid).reduce((q, a) => q + a.cantidad, 0), 0)
+      saldo.set(x.pid, Math.max(0, partida(x.pid)!.cantidad - hecho))
+    }
+    const porPartida = (pid: string) => ultimas.filter((y) => y.pid === pid).reduce((s, y) => s + y.cant, 0)
     ultimas.forEach((x, n) => {
       const st = paso1(partida(x.pid)!.unidad)
-      const meta = Math.max(st, Math.round(x.cant / st) * st)
+      // Dos semanas por delante (en curso y próxima) no pueden pasar el saldo de la partida
+      const tope = (saldo.get(x.pid)! / 2) * (x.cant / Math.max(1e-9, porPartida(x.pid)))
+      const meta = Math.max(st, Math.round(Math.min(x.cant, tope) / st) * st)
       const c = cuadrilla(x.cid)!
       const enCurso = actual + x.desde <= hoyDia - 1
       out.push(tarea(actual, n, x.cid, x.pid, meta, {
@@ -1106,7 +1173,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 9
+export const VERSION_DEMO = 10
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1125,7 +1192,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1167,6 +1234,7 @@ function generar(hoyDia: Dia): Datos {
   d.proveedores = PROVEEDORES_DEMO.map((x) => ({ ...x }))
   d.materiales = MATERIALES_DEMO.map(({ recurso: _r, proveedor: _p, ...m }) => m)
   Object.assign(d, comprasDemo(d, hoyDia))
+  d.movimientosStock = bodegaDemo(d, hoyDia)
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

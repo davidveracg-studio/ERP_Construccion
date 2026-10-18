@@ -467,6 +467,32 @@ export interface OrdenCompra {
   creadoPor: string
 }
 
+export type TipoMovimiento = 'entrada' | 'salida' | 'traspaso' | 'merma' | 'ajuste'
+
+/** Movimiento inmutable de la bodega de obra (08 Bodega, Stock y Movimiento). */
+export interface MovimientoStock {
+  id: string
+  obraId: string
+  materialId: string
+  fecha: Dia
+  tipo: TipoMovimiento
+  /** Siempre positiva, salvo en un ajuste (negativa si descuenta). */
+  cantidad: number
+  /** Costo unitario de la entrada (para valorizar el stock a costo promedio). */
+  costoUnitario?: number
+  /** Salida: partida que consume. */
+  partidaId?: string
+  /** Entrada: OC y recepción de origen. */
+  ordenCompraId?: string
+  recepcionId?: string
+  /** Salida que atiende una solicitud de terreno. */
+  solicitudId?: string
+  /** Traspaso: obra de destino (en la de destino se registra la entrada). */
+  obraDestinoId?: string
+  motivo?: string
+  autor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
