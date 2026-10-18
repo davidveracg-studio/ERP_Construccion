@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R11'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -11,6 +11,7 @@ export const ROLES: Record<Rol, string> = {
   R03: 'Jefe de Terreno',
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
+  R07: 'Bodega y Adquisiciones',
   R11: 'Mandante / ITO',
 }
 
@@ -379,6 +380,93 @@ export interface TareaSemanal {
   creadoPor: string
 }
 
+/** Proveedor de la empresa (08 Proveedor): evaluado por OTIF, lead time y precio. */
+export interface Proveedor {
+  id: string
+  rut: string
+  nombre: string
+  rubro: string
+  contacto?: string
+  email?: string
+  telefono?: string
+  /** RULE-302: inactivo o bloqueado no puede recibir órdenes de compra. */
+  estado: 'activo' | 'inactivo' | 'bloqueado'
+  motivoBloqueo?: string
+}
+
+/** Material del catálogo de la empresa (08 Material). */
+export interface Material {
+  id: string
+  codigo: string
+  nombre: string
+  unidad: string
+  categoria: string
+  /** Su falta detiene actividades críticas o tiene lead time largo. */
+  critico: boolean
+}
+
+export type Urgencia = 'planificada' | 'urgente'
+export type EstadoSolicitud = 'enviada' | 'en_gestion' | 'atendida_bodega' | 'en_compra' | 'recibida_parcial' | 'completada' | 'rechazada'
+
+/** Requerimiento de material desde terreno (08 Solicitud de Material, 10 §12). */
+export interface SolicitudMaterial {
+  id: string
+  obraId: string
+  numero: number
+  materialId: string
+  cantidad: number
+  partidaId: string
+  fechaRequerida: Dia
+  urgencia: Urgencia
+  nota?: string
+  historial: PasoDoc<EstadoSolicitud>[]
+  ordenCompraId?: string
+  creado: Dia
+  creadoPor: string
+}
+
+export type EstadoOC = 'borrador' | 'por_aprobar' | 'aprobada' | 'enviada' | 'recibida_parcial' | 'recibida' | 'cerrada' | 'anulada'
+
+export interface LineaOC {
+  id: string
+  materialId: string
+  cantidad: number
+  precio: number
+  partidaId: string
+  solicitudId?: string
+}
+
+/** Recepción contra la OC, total o parcial, con guía de despacho (base de OTIF y lead time). */
+export interface RecepcionOC {
+  id: string
+  fecha: Dia
+  guia: string
+  cantidades: Record<string, number>
+  recibidoPor: string
+}
+
+/** Orden de compra imputada a obra y partida (08, 10 §13). */
+export interface OrdenCompra {
+  id: string
+  obraId: string
+  numero: number
+  proveedorId: string
+  lineas: LineaOC[]
+  /** Fecha de entrega comprometida por el proveedor. */
+  fechaEntrega: Dia
+  urgente: boolean
+  cotizaciones: number
+  /** RULE-303: justificación si no hay cotizaciones mínimas (proveedor único, urgencia). */
+  justificacion?: string
+  /** Líneas que al enviarse a aprobación superaban el saldo de su partida (KAB-09; requiere Gerencia). */
+  fueraPresupuesto?: string[]
+  historial: PasoDoc<EstadoOC>[]
+  recepciones: RecepcionOC[]
+  factura?: string
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -601,7 +689,7 @@ export interface RDO {
   validadoPor?: string
 }
 
-export type OrigenCosto = 'importacion' | 'manual'
+export type OrigenCosto = 'importacion' | 'manual' | 'recepcion'
 
 export interface CostoReal {
   id: string
@@ -764,7 +852,13 @@ export interface Config {
     margenMinimo: number
     vac: [number, number]
     recargoExtra: number
+    /** RN-P04: el administrador de obra aprueba OC hasta este monto en UF; sobre él, Gerencia. */
+    limiteOcUf?: number
+    /** RULE-303: sobre este monto en UF se exigen 3 cotizaciones o una justificación. */
+    cotizacionesUf?: number
   }
+  /** Valor de la UF en pesos para los umbrales expresados en UF. */
+  valorUF?: number
   metodoEAC: 'cpi' | 'presupuesto' | 'cpi_spi'
   /** Provisionar costo de subcontratos según avance validado. */
   devengarSubcontratos: boolean

@@ -1,6 +1,6 @@
 import type {
   AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Garantia, Obligacion, Obra, OrdenCambio, Partida,
-  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal,
+  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra,
 } from './types'
 
 /** Conjunto completo de datos de una empresa (lo que persiste el store). */
@@ -28,6 +28,10 @@ export interface Datos {
   submittals: Submittal[]
   folios: Folio[]
   tareasSemanales: TareaSemanal[]
+  proveedores: Proveedor[]
+  materiales: Material[]
+  solicitudesMaterial: SolicitudMaterial[]
+  ordenesCompra: OrdenCompra[]
 }
 
 export const CONFIG_DEFECTO: Config = {
@@ -46,7 +50,10 @@ export const CONFIG_DEFECTO: Config = {
     margenMinimo: 0.06,
     vac: [0.03, 0.07],
     recargoExtra: 0.5,
+    limiteOcUf: 150,
+    cotizacionesUf: 100,
   },
+  valorUF: 40_000,
   metodoEAC: 'cpi',
   devengarSubcontratos: true,
   diasHabiles: [1, 2, 3, 4, 5],
@@ -61,12 +68,13 @@ export function programaDe(d: Datos, obraId: string, tipo: Programa['tipo']): Pr
 export const COLECCIONES = [
   'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago', 'ordenesCambio', 'obligaciones', 'garantias', 'recepciones', 'riesgos',
   'documentos', 'rfis', 'submittals', 'folios', 'tareasSemanales',
+  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra',
 ] as const
 export type Coleccion = (typeof COLECCIONES)[number]
 
 export function datosVacios(): Datos {
   return {
     config: CONFIG_DEFECTO, obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [],
   }
 }

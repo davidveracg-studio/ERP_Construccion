@@ -1,6 +1,7 @@
 // Motor de Control de Obra (13 §5): EVM, forecast por partida, plazo y productividad.
 // Fórmulas en docs 14 §3–§4.
 import { calcularCaja, type ResumenCaja } from './caja'
+import { compromisoOC, indicadoresCompras, type IndicadoresCompras } from './compras'
 import { calcularCPM, type ResultadoCPM } from './cpm'
 import { programaDe, type Datos } from './datos'
 import { diaSemana, diasHabilesEntre } from './fechas'
@@ -113,6 +114,8 @@ export interface CalcObra {
   hitos: HitoCalc[]
   /** Flujo de caja de la obra (v1.3). */
   caja: ResumenCaja
+  /** Indicadores de abastecimiento (v1.2, semáforo Compras). */
+  compras: IndicadoresCompras
 }
 
 const TIPOS: TipoRecurso[] = ['MO', 'MAT', 'EQ', 'SUB', 'OTRO']
@@ -215,6 +218,8 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
     }
     comprometido.set(k.partidaId, (comprometido.get(k.partidaId) ?? 0) + Math.max(0, k.monto - pagado))
   }
+  // Saldo por recibir de las órdenes de compra aprobadas (v1.2)
+  for (const [pid, monto] of compromisoOC(d.ordenesCompra, obraId, corte)) comprometido.set(pid, (comprometido.get(pid) ?? 0) + monto)
 
   // --- Programado ---
   const cantidades = new Map(partidas.map((p) => [p.id, p.cantidad]))
@@ -398,6 +403,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   } as CalcObra
   // La caja usa el EVM ya calculado (costo por completar, término proyectado)
   calculado.caja = calcularCaja(d, calculado)
+  calculado.compras = indicadoresCompras(d.ordenesCompra, d.solicitudesMaterial, obraId, corte)
   return calculado
 }
 

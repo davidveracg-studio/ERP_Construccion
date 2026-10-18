@@ -22,7 +22,7 @@ La app tiene dos modos según las variables de entorno:
 
 ### Configurar Supabase (una vez)
 
-1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql`, `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM) `0004_estados_pago.sql` (estados de pago) y `0005_v11_oficina_tecnica.sql` (tablas de la v1.1 y bucket de documentos). Todos son idempotentes.
+1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql`, `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM) `0004_estados_pago.sql` (estados de pago) y `0005_v11_oficina_tecnica.sql` (tablas de la v1.1 y bucket de documentos) y `0006_v12_abastecimiento.sql` (tablas de la v1.2 y roles R07/R09/R10/R11). Todos son idempotentes.
 2. **Authentication → Sign In / Providers** → activar *Allow anonymous sign-ins*.
 3. Copiar `.env.example` a `.env.local` con la URL y la clave **anon public** del proyecto. La clave `service_role` nunca va en el frontend.
 
@@ -45,6 +45,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Planos, RFI y submittals | `/documentos` — planos, EETT y memorias con control de revisiones (una vigente, las demás superadas), archivo adjunto en el bucket `documentos-obra` y confirmación de terreno (RULE-905); RFI borrador → emitido → respondido ⇄ repregunta → cerrado (vincula OC o riesgo; RULE-903, alta si toca la ruta crítica); submittals con aprobación del mandante y revisión siguiente al rechazarse; KDO-01…03 | v1.1 · 08, 10 §26–27, 12, 14 |
 | Libro de Obra | `/libro-obra` — folios numerados, fechados, firmados e inmutables; el ITO (R11) firma como mandante, R02/R03 como contratista; instrucciones y observaciones del ITO esperan respuesta en 3 días hábiles o el plazo indicado (RULE-902) | v1.1 · 08, 19 RN-P03 |
 | Plan semanal (Last Planner) | `/plan-semanal` — tareas por cuadrilla y partida con meta semanal; restricciones (material, plano, RFI, submittal, equipo…) que impiden comprometer, y las de RFI/submittal se liberan solas al responderse o aprobarse; propuesta → comprometida → en ejecución → cumplida / no cumplida (causa obligatoria) y replanificación; lo logrado sale de los RDO; PPC semanal (KPL-04), Pareto de causas, RULE-113 (PPC bajo meta) y RULE-114 (restricción sin liberar a 48 h) | v1.1 · 08, 10 §8, 14 |
+| Compras y abastecimiento | `/compras` — solicitudes de material desde terreno (R03/R04) → orden de compra imputada a partida (R07) con aprobación por monto (R02 hasta 150 UF, Gerencia sobre eso o fuera de presupuesto) → recepciones parciales o totales con guía, que generan el costo real; el saldo por recibir suma al comprometido de la partida; proveedores con bloqueo (RULE-302), cotizaciones mínimas (RULE-303), catálogo de materiales; KAB-01/02/03/06/09/12, semáforo **Compras** (OTIF), RULE-305/306 | v1.2 · 08, 10 §12–13, 12, 14 |
 | Portal mandante | `/mandante` (rol R11) — avance en % y curva S, EP y OC por aprobar, RFI y submittals por responder, Libro de Obra, historial; sin costos, márgenes ni alertas internas | v1.1 · 07, 19 §5 |
 | Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
@@ -68,6 +69,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   riesgos.ts      Registro de riesgos: matriz, exposición, transiciones por rol e indicadores KRI
   documental.ts   Planos y revisiones, RFI, submittals, Libro de Obra e indicadores KDO
   lastPlanner.ts  Plan semanal, restricciones, PPC (KPL-04) y causas de no cumplimiento
+  compras.ts      Solicitudes, órdenes de compra, recepciones, compromiso por OC, OTIF e indicadores KAB
   ordenesCambio.ts Órdenes de cambio: etapas, umbral RN-P04, efectos de la aprobación y vigencia de partidas
   estadosPago.ts  Ciclo del EP: etapas, permisos por rol, cubicación, reajuste, indicadores y RULE-403
   caja.ts         Flujo de caja: estados de pago, cobros, pagos, proyección y mínimo a 60 días
