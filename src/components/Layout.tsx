@@ -41,6 +41,7 @@ const NAV: Item[] = [
   { to: '/compras', etiqueta: 'Compras y abastecimiento', roles: ['R01', 'R02', 'R03', 'R04', 'R05', 'R07'], icono: '⊞' },
   { to: '/bodega', etiqueta: 'Bodega de obra', roles: ['R01', 'R02', 'R03', 'R04', 'R05', 'R07'], icono: '▣' },
   { to: '/subcontratos', etiqueta: 'Subcontratos', roles: ['R01', 'R02', 'R03', 'R05'], icono: '⧉' },
+  { to: '/maquinaria', etiqueta: 'Maquinaria', roles: ['R01', 'R02', 'R03', 'R04', 'R05', 'R07'], icono: '⚒' },
   { to: '/subcontratista', etiqueta: 'Portal subcontratista', roles: ['R10'], icono: '⌂' },
   { to: '/documentos', etiqueta: 'Planos, RFI y submittals', roles: ['R01', 'R02', 'R03', 'R05'], icono: '▭' },
   { to: '/libro-obra', etiqueta: 'Libro de Obra', roles: ['R01', 'R02', 'R03', 'R05', 'R11'], icono: '☰' },

@@ -3,6 +3,7 @@ import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
+import { CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, IMPRODUCTIVAS_MAX, indicadoresEquipo, MODALIDAD, UTILIZACION_MIN } from './maquinaria'
 import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
 import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
 import { CAUSAS_CNC, indicadoresLP, PPC_ALERTA, PPC_ROJO, restriccionesAbiertas, restriccionUrgente, TIPOS_RESTRICCION } from './lastPlanner'
@@ -46,6 +47,8 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-110': 'Registro de HH inconsistente',
   'RULE-201': 'Material requerido sin stock ni OC',
   'RULE-202': 'Consumo de material sobre presupuesto',
+  'RULE-205': 'Baja utilización de maquinaria',
+  'RULE-206': 'Horas improductivas de maquinaria sobre umbral',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-305': 'OTIF de proveedor bajo',
   'RULE-306': 'Compras urgentes sobre umbral',
@@ -466,6 +469,36 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
       accionRequerida: 'Revisar mermas y despachos en bodega, y el rendimiento real del material en terreno.',
       responsable: o.jefeTerreno,
     })
+  }
+
+  // Maquinaria (v1.2): RULE-205 baja utilización de equipos de costo fijo y RULE-206 horas improductivas (últimos 7 días)
+  for (const eq of equiposDeObra(d.equipos, o.id, c.corte)) {
+    const k = indicadoresEquipo(eq, d.partesMaquinaria, c.corte)
+    if (k.partes < 3) continue
+    if (costoFijo(eq) && k.utilizacion != null && k.utilizacion < UTILIZACION_MIN)
+      out.push({
+        regla: 'RULE-205', clave: `RULE-205|${eq.id}`, severidad: 'media', titulo: `Baja utilización: ${eq.nombre} (${pct(k.utilizacion, 0)})`, entidad: `${eq.codigo} · ${o.nombre}`,
+        datos: [
+          { etiqueta: 'Horas trabajadas / disponibles', valor: `${num(k.trabajadas, 1)} / ${num(k.disponibles, 1)}` },
+          { etiqueta: 'Tarifa', valor: `${mm(eq.tarifa.monto)} ${MODALIDAD[eq.tarifa.modalidad]}` },
+          { etiqueta: 'Costo de horas ociosas', valor: mm(k.costoOcioso) },
+        ],
+        porQue: 'El equipo tiene costo fijo y estuvo disponible mucho más tiempo del que trabajó.',
+        queProvoca: 'Las horas ociosas igual se pagan y encarecen el costo por hora trabajada.',
+        accionRequerida: 'Liberar el equipo, reasignarlo a otra obra o cambiarlo a arriendo por hora.',
+        responsable: o.administrador, kpi: 'KMQ-01', valorKpi: k.utilizacion,
+      })
+    if ((k.improductividad != null && k.improductividad > IMPRODUCTIVAS_MAX) || k.causaRepetida)
+      out.push({
+        regla: 'RULE-206', clave: `RULE-206|${eq.id}`, severidad: 'media', titulo: `Horas improductivas: ${eq.nombre}`, entidad: `${eq.codigo} · ${o.nombre}`,
+        datos: [
+          { etiqueta: 'Improductivas / disponibles', valor: k.improductividad != null ? pct(k.improductividad, 0) : '—' },
+          ...k.porCausa.slice(0, 3).map((x) => ({ etiqueta: CAUSAS_IMPRODUCTIVAS[x.causa], valor: `${num(x.horas, 1)} h` })),
+        ],
+        porQue: k.causaRepetida ? `La misma causa (${CAUSAS_IMPRODUCTIVAS[k.causaRepetida].toLowerCase()}) se repite al menos 3 días seguidos.` : 'Más del 20 % del tiempo disponible el equipo estuvo detenido.',
+        accionRequerida: 'Coordinar frentes de trabajo, operador y combustible para que el equipo no espere.',
+        responsable: o.jefeTerreno, kpi: 'KMQ-02', valorKpi: k.improductividad ?? undefined,
+      })
   }
 
   // Abastecimiento (v1.2): RULE-305 OTIF de proveedor bajo y RULE-306 compras urgentes sobre umbral
