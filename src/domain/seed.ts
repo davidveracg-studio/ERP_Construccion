@@ -14,7 +14,7 @@ import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
-  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock,
+  Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato,
 } from './types'
 
 function rng(seed: number) {
@@ -644,6 +644,109 @@ function comprasDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'solicitudesMaterial' |
   return { solicitudesMaterial: solicitudes, ordenesCompra: ordenes }
 }
 
+/** Especialidad y RUT de los subcontratistas de la demo (por nombre del compromiso importado). */
+const SUBCONTRATISTAS_DEMO: Record<string, { rut: string; especialidad: string; contacto: string }> = {
+  'Fierros del Norte SpA': { rut: '76.220.110-4', especialidad: 'Enfierradura', contacto: 'Raúl Contreras' },
+  'Sanitarios Coquimbo': { rut: '77.310.450-2', especialidad: 'Instalaciones sanitarias', contacto: 'Marta Lillo' },
+  'Eléctrica Norte Ltda.': { rut: '76.885.020-6', especialidad: 'Instalaciones eléctricas', contacto: 'Sergio Pizarro' },
+  'Pinturas Andes': { rut: '78.112.330-1', especialidad: 'Pintura', contacto: 'Camila Rojas' },
+  'Clima Norte SpA': { rut: '76.540.900-3', especialidad: 'Climatización', contacto: 'Felipe Arancibia' },
+  'Maestranza Elqui': { rut: '96.330.210-8', especialidad: 'Estructuras metálicas', contacto: 'Héctor Cortés' },
+  'Cubiertas del Pacífico': { rut: '77.990.115-5', especialidad: 'Cubiertas y revestimientos', contacto: 'Daniela Fuentes' },
+}
+
+/**
+ * Subcontratos de la demo: uno por compromiso de subcontrato importado (SC-…), con su EP mensual por el
+ * avance validado de cada mes. Los meses anteriores están pagados y el último va en curso. Los de la obra
+ * terminada quedan terminados o cerrados. Sin costos nuevos: los del subcontrato ya vienen importados.
+ */
+function subcontratosDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'proveedores' | 'subcontratos' | 'epsSubcontrato' | 'compromisos'> {
+  const proveedores = [...d.proveedores]
+  const compromisos = d.compromisos.map((k) => ({ ...k }))
+  const subcontratos: Subcontrato[] = []
+  const eps: EPSubcontrato[] = []
+  const paso = <E extends string>(fecha: Dia, estado: E, por: string) => ({ fecha, estado, por })
+  // Avance validado por partida y día (una sola pasada por los RDO)
+  const validadoDia = new Map<string, [Dia, number][]>()
+  for (const r of d.rdos) {
+    if (r.estado !== 'validado') continue
+    for (const a of r.avances) {
+      const v = validadoDia.get(a.partidaId) ?? []
+      v.push([r.fecha, a.cantidad])
+      validadoDia.set(a.partidaId, v)
+    }
+  }
+  const acumuladoHasta = (pid: string, corte: Dia) => (validadoDia.get(pid) ?? []).reduce((s, [f, q]) => (f <= corte ? s + q : s), 0)
+  for (const obra of d.obras) {
+    const subs = compromisos.filter((k) => k.obraId === obra.id && k.tipo === 'SUB' && k.partidaId)
+    subs.forEach((k, i) => {
+      const nombre = k.proveedor ?? 'Subcontratista'
+      let prov = proveedores.find((p) => p.nombre === nombre)
+      const info = SUBCONTRATISTAS_DEMO[nombre]
+      if (!prov) {
+        prov = { id: `prov_sub_${proveedores.length}`, rut: info?.rut ?? '76.000.000-0', nombre, rubro: info?.especialidad ?? 'Subcontratos', contacto: info?.contacto, estado: 'activo' }
+        proveedores.push(prov)
+      }
+      prov.esSubcontratista = true
+      prov.especialidad = info?.especialidad
+      const p = d.partidas.find((x) => x.id === k.partidaId)!
+      const validados = (validadoDia.get(p.id) ?? []).map(([f]) => f)
+      const primero = validados.length ? Math.min(...validados) : Math.max(obra.fechaInicio, hoyDia - 1)
+      const firma = Math.min(primero - 10, hoyDia - 3)
+      const id = `sc_${obra.id}_${k.documento}`
+      const terminado = obra.estado !== 'en_ejecucion'
+      const ultimo = validados.length ? Math.max(...validados) : primero
+      const historial = [paso(firma, 'en_acreditacion' as const, obra.administrador), paso(firma + 4, 'vigente' as const, obra.administrador)]
+      const sc: Subcontrato = {
+        id, obraId: obra.id, numero: i + 1, codigo: k.documento, subcontratistaId: prov.id, descripcion: p.descripcion,
+        lineas: [{ partidaId: p.id, cantidad: p.cantidad, pu: Math.round((k.monto / p.cantidad) * 100) / 100 }], retencion: 0.05,
+        inicio: primero, termino: obra.fechaInicio + obra.plazoDias, ajustes: [], historial, compromisos: { [p.id]: k.id }, creado: firma - 2, creadoPor: obra.oficinaTecnica,
+      }
+      // EP mensuales por el avance validado de cada mes
+      let previo = 0
+      let n = 0
+      for (let corte = finDeMes(obra.fechaInicio); corte + 2 <= hoyDia - 1; corte = finDeMes(corte + 1)) {
+        const acumulado = Math.min(p.cantidad, acumuladoHasta(p.id, corte))
+        const cantidad = Math.round((acumulado - previo) * 1000) / 1000
+        if (cantidad <= 0) continue
+        previo += cantidad
+        n++
+        const pasos = [paso(corte + 2, 'presentado' as const, obra.administrador), paso(corte + 4, 'validado' as const, obra.jefeTerreno), paso(corte + 6, 'aprobado' as const, obra.administrador), paso(corte + 30, 'pagado' as const, obra.administrador)]
+        eps.push({
+          id: `eps_${id}_${n}`, obraId: obra.id, subcontratoId: id, numero: n, fechaCorte: corte, lineas: [{ partidaId: p.id, cantidad }], descuentos: 0,
+          historial: pasos.filter((x) => x.fecha <= hoyDia - 1), creado: corte + 1, creadoPor: obra.administrador,
+        })
+      }
+      if (terminado && previo >= p.cantidad - 1e-6) {
+        sc.historial.push(paso(Math.min(ultimo + 3, hoyDia - 2), 'terminado' as const, obra.administrador))
+        // La estructura metálica ya se cerró con la retención devuelta
+        const pagados = eps.filter((e) => e.subcontratoId === id).every((e) => e.historial.at(-1)?.estado === 'pagado')
+        if (k.documento === 'SC-201' && pagados) {
+          const cierre = Math.min(Math.max(...eps.filter((e) => e.subcontratoId === id).map((e) => e.historial.at(-1)!.fecha)) + 5, hoyDia - 1)
+          sc.historial.push(paso(cierre, 'cerrado' as const, obra.administrador))
+          sc.retencionDevuelta = cierre
+        }
+      }
+      subcontratos.push(sc)
+    })
+  }
+  // Una multa aplicada en un EP (enfierradura) y un descuento (escombros en la clínica), que baja el compromiso
+  const fierros = subcontratos.find((x) => x.codigo === 'SC-003')
+  const epF = fierros && eps.filter((e) => e.subcontratoId === fierros.id).at(-2)
+  if (fierros && epF) {
+    fierros.ajustes.push({ id: 'aj1', tipo: 'multa', fecha: epF.fechaCorte, monto: 350_000, descripcion: 'Atraso en la entrega de la enfierradura de la losa del piso 3' })
+    epF.descuentos = 350_000
+  }
+  const electrica = subcontratos.find((x) => x.codigo === 'SC-101')
+  if (electrica) {
+    const fecha = Math.min(electrica.inicio + 20, hoyDia - 1)
+    electrica.ajustes.push({ id: 'aj1', tipo: 'descuento', fecha, monto: 500_000, descripcion: 'Retiro de escombros de su faena cargado al subcontratista' })
+    const k = compromisos.find((x) => x.id === electrica.compromisos[electrica.lineas[0].partidaId])
+    if (k) k.monto -= 500_000
+  }
+  return { proveedores, subcontratos, epsSubcontrato: eps, compromisos }
+}
+
 /**
  * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
  * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
@@ -1173,7 +1276,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 10
+export const VERSION_DEMO = 11
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1192,7 +1295,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1235,6 +1338,8 @@ function generar(hoyDia: Dia): Datos {
   d.materiales = MATERIALES_DEMO.map(({ recurso: _r, proveedor: _p, ...m }) => m)
   Object.assign(d, comprasDemo(d, hoyDia))
   d.movimientosStock = bodegaDemo(d, hoyDia)
+  // Subcontratos y sus estados de pago (desde los compromisos SC-… y el avance validado)
+  Object.assign(d, subcontratosDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades
