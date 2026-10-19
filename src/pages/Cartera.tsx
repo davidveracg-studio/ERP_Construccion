@@ -88,7 +88,7 @@ export default function Cartera() {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-slate-500">Toca una luz para ver la explicación de la desviación. Las dimensiones grises se habilitan en versiones posteriores (calidad y seguridad, v1.3).</p>
+        <p className="mt-3 text-xs text-slate-500">Toca una luz para ver la explicación de la desviación. Las dimensiones en gris no aplican a esa obra (por ejemplo, compras en una obra terminada).</p>
       </Card>
     </div>
   )
