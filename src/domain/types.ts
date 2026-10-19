@@ -995,6 +995,36 @@ export interface SolicitudPostventa {
   creadoPor: string
 }
 
+// --- Auditoría mensual (v2: 14 §14) ---
+/** Informe ejecutivo del mes (foto inmutable). */
+export interface InformeAuditoria {
+  mes: string
+  corte: Dia
+  scoreEmpresa: number | null
+  nivel: string
+  componentes: { obras: number | null; liquidez: number | null; backlog: number | null; accidentabilidad: number | null }
+  riesgo: { nivel: string; puntos: number; factores: { factor: string; puntos: number; detalle: string }[] }
+  benchmark: { fuente: string; empresas: number; posicion: number; promedio: number }
+  madurez: number
+  calidadDatos: number | null
+  obras: { id: string; nombre: string; estado: EstadoObra; health: number | null; semaforo: Record<string, EstadoSemaforo>; cpi: number | null; spi: number | null; margen: number }[]
+  fortalezas: { titulo: string; detalle: string }[]
+  debilidades: { titulo: string; detalle: string }[]
+  desviaciones: { obra: string; partida: string; vac: number; causa: string }[]
+  riesgos: { obra: string; titulo: string; monto: number; dias: number; nivel: string }[]
+  recomendaciones: { texto: string; regla?: string }[]
+  proyeccion: { resultado: number; margen: number | null; cajaMinima60: number; backlog: number; mesesBacklog: number | null }
+}
+
+export interface Auditoria {
+  id: string
+  mes: string
+  corte: Dia
+  fecha: Dia
+  generadaPor: string
+  informe: InformeAuditoria
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -1397,6 +1427,8 @@ export interface Config {
   }
   /** Valor de la UF en pesos para los umbrales expresados en UF. */
   valorUF?: number
+  /** Región de la empresa (segmento del benchmark, 14 §7). */
+  region?: string
   metodoEAC: 'cpi' | 'presupuesto' | 'cpi_spi'
   /** Provisionar costo de subcontratos según avance validado. */
   devengarSubcontratos: boolean
