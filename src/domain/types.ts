@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R08' | 'R09' | 'R10' | 'R11'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R06' | 'R07' | 'R08' | 'R09' | 'R10' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -11,6 +11,7 @@ export const ROLES: Record<Rol, string> = {
   R03: 'Jefe de Terreno',
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
+  R06: 'Estudios / Comercial',
   R07: 'Bodega y Adquisiciones',
   R08: 'Prevención de Riesgos',
   R09: 'Finanzas',
@@ -876,6 +877,88 @@ export interface TransaccionFinanciera {
   contraparte: string
   documento?: string
   monto: number
+  creadoPor: string
+}
+
+// --- Comercial (v2: 08 dominio 3, 10 §2–4) ---
+export interface Cliente {
+  id: string
+  nombre: string
+  rut?: string
+  tipo: 'persona' | 'empresa' | 'inmobiliaria' | 'publico'
+  /** RULE-004: un cliente bloqueado exige autorización de Gerencia para proponer o contratar. */
+  estado: 'activo' | 'bloqueado'
+  contacto?: string
+  creado: Dia
+}
+
+export type EstadoLead = 'nuevo' | 'en_estudio' | 'propuesta_enviada' | 'ganado' | 'perdido' | 'descartado'
+
+export interface Lead {
+  id: string
+  numero: number
+  clienteId: string
+  /** Nombre del proyecto. */
+  nombre: string
+  origen: 'licitacion' | 'solicitud' | 'referido'
+  lineaNegocio: string
+  ubicacion: string
+  montoEstimado: number
+  /** Cierre de la licitación o fecha comprometida de entrega de la oferta (RULE-001). */
+  fechaCierre?: Dia
+  responsable?: string
+  motivo?: string
+  historial: PasoDoc<EstadoLead>[]
+  creado: Dia
+  creadoPor: string
+}
+
+export interface VisitaTecnica {
+  id: string
+  leadId: string
+  fecha: Dia
+  responsable: string
+  estado: 'agendada' | 'realizada' | 'cancelada'
+  notas?: string
+}
+
+export type EstadoPropuesta = 'borrador' | 'en_revision' | 'enviada' | 'adjudicada' | 'rechazada' | 'desierta' | 'anulada'
+
+/** Línea del itemizado con su análisis de precio unitario (APU). */
+export interface LineaPropuesta {
+  id: string
+  codigo: string
+  capitulo: string
+  descripcion: string
+  unidad: string
+  cantidad: number
+  recursos: Recurso[]
+  /** De dónde salió el APU (ej.: "Real · Edificio Los Aromos"). */
+  fuente?: string
+}
+
+export interface Propuesta {
+  id: string
+  leadId: string
+  numero: number
+  version: number
+  /** Versión anterior (una propuesta vencida o reformulada se rehace como hija). */
+  anteriorId?: string
+  lineas: LineaPropuesta[]
+  /** Gastos generales de la oferta (monto). */
+  gg: number
+  /** Margen objetivo sobre el precio: precio = (costo directo + GG) / (1 − margen). */
+  margen: number
+  plazoDias: number
+  validezHasta: Dia
+  exclusiones: string
+  /** V°B° de Gerencia para enviar (con justificación si el margen está bajo el mínimo o el cliente bloqueado). */
+  aprobacion?: { fecha: Dia; por: string; justificacion?: string }
+  motivoRechazo?: 'precio' | 'plazo' | 'tecnico' | 'otro'
+  /** Obra creada al adjudicar. */
+  obraId?: string
+  historial: PasoDoc<EstadoPropuesta>[]
+  creado: Dia
   creadoPor: string
 }
 

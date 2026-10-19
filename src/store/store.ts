@@ -40,6 +40,9 @@ import {
   accionesIncidente, ESTADO_POR_ACCION_INC, puedeART, puedeCharla, puedeCumplirMedida, puedeGestionarSST, puedeMarcarCritica, puedeObservar, puedeReportarIncidente,
   validarAccionIncidente, type AccionIncidente,
 } from '../domain/seguridad'
+import {
+  accionesPropuesta, clienteObservado, estadoLead, estadoPropuesta, margenBajo, puCostoLinea, puedeComercial, puedeVisita, totalesPropuesta, type AccionPropuesta,
+} from '../domain/comercial'
 import { codigoDTE, conIVA, estadoDTE, puedeAnularConNC, puedeFacturar, puedeTesoreria, siguienteFolio } from '../domain/finanzas'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
@@ -48,6 +51,7 @@ import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
   EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion, ProtocoloCalidad, NoConformidad, InspeccionCalidad,
   CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, TipoTareaCritica, DocumentoTributario,
+  Cliente, Lead, VisitaTecnica, Propuesta, EstadoLead,
 } from '../domain/types'
 
 export interface UI {
@@ -62,6 +66,7 @@ export const USUARIOS: Record<Rol, string> = {
   R03: 'Juan Soto',
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
+  R06: 'Daniela Fuentes',
   R07: 'Patricia Lagos',
   R08: 'Marcela Ríos',
   R09: 'Lorena Castro',
@@ -222,6 +227,17 @@ export interface Acciones {
   anularConNotaCredito: (facturaId: string, motivo: string) => string | null
   /** Registra el pago de una factura de proveedor (costo). */
   pagarCosto: (costoId: string) => string | null
+  guardarCliente: (c: Omit<Cliente, 'id' | 'creado'> & { id?: string }) => string | null
+  crearLead: (l: Pick<Lead, 'clienteId' | 'nombre' | 'origen' | 'lineaNegocio' | 'ubicacion' | 'montoEstimado' | 'fechaCierre'>) => string | null
+  /** estudiar (asigna responsable), perder o descartar (RULE-002: motivo obligatorio). */
+  accionLead: (id: string, accion: 'estudiar' | 'perder' | 'descartar', x: { responsable?: string; motivo?: string }) => string | null
+  agendarVisita: (v: Pick<VisitaTecnica, 'leadId' | 'fecha' | 'responsable'>) => string | null
+  cerrarVisita: (id: string, estado: 'realizada' | 'cancelada', notas: string) => string | null
+  /** Propuesta nueva en borrador (o versión hija de otra, con su itemizado); devuelve su id o el error. */
+  crearPropuesta: (leadId: string, anteriorId?: string) => { id?: string; error?: string }
+  editarPropuesta: (id: string, cambios: Partial<Pick<Propuesta, 'lineas' | 'gg' | 'margen' | 'plazoDias' | 'validezHasta' | 'exclusiones'>>) => string | null
+  /** Adjudicar crea la obra en planificación con el itemizado como presupuesto. */
+  accionPropuesta: (id: string, accion: AccionPropuesta, x?: { texto?: string; motivo?: Propuesta['motivoRechazo']; fechaInicio?: Dia }) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -1359,6 +1375,138 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ transacciones: [...x.transacciones, { id: uid('tx'), obraId: k.obraId, fecha: hoy(), tipo: 'pago', concepto: 'proveedor', refId: k.id, contraparte: k.proveedor ?? k.descripcion, documento: k.documento, monto: k.monto, creadoPor: s.ui.usuario }] }))
           return null
         },
+        guardarCliente: (c) => {
+          const s = getS()
+          if (!puedeComercial(s.ui.rol)) return 'Los clientes los administra Comercial.'
+          if (!c.nombre.trim()) return 'Indica el nombre del cliente.'
+          if (c.estado === 'bloqueado' && s.ui.rol !== 'R01') return 'Solo Gerencia bloquea un cliente.'
+          mutar((x) => ({
+            clientes: c.id ? x.clientes.map((y) => (y.id === c.id ? { ...y, ...c, nombre: c.nombre.trim() } : y)) : [...x.clientes, { ...c, id: uid('cl'), nombre: c.nombre.trim(), creado: hoy() }],
+          }))
+          return null
+        },
+        crearLead: (l) => {
+          const s = getS()
+          if (!puedeComercial(s.ui.rol)) return 'Los leads los registra Comercial.'
+          if (!l.nombre.trim() || !l.clienteId) return 'Indica el proyecto y el cliente.'
+          const numero = Math.max(0, ...s.leads.map((x) => x.numero)) + 1
+          mutar((x) => ({ leads: [...x.leads, { ...l, id: uid('ld'), numero, nombre: l.nombre.trim(), historial: [], creado: hoy(), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        accionLead: (id, accion, x) => {
+          const s = getS()
+          const l = s.leads.find((y) => y.id === id)
+          if (!l) return 'El lead no existe.'
+          if (!puedeComercial(s.ui.rol)) return 'Tu rol no gestiona leads.'
+          const t = hoy()
+          const e = estadoLead(l, t)
+          const permitido: Record<typeof accion, EstadoLead[]> = { estudiar: ['nuevo'], perder: ['nuevo', 'en_estudio', 'propuesta_enviada'], descartar: ['nuevo', 'en_estudio'] }
+          if (!e || !permitido[accion].includes(e)) return 'El lead no admite esa acción en su estado.'
+          if (accion === 'estudiar' && !x.responsable?.trim()) return 'Asigna el responsable del estudio.'
+          if (accion !== 'estudiar' && !x.motivo?.trim()) return 'El motivo es obligatorio (RULE-002).'
+          const estado: EstadoLead = accion === 'estudiar' ? 'en_estudio' : accion === 'perder' ? 'perdido' : 'descartado'
+          mutar((st) => ({
+            leads: st.leads.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado, por: s.ui.usuario }], ...(x.responsable?.trim() ? { responsable: x.responsable.trim() } : {}), ...(x.motivo?.trim() ? { motivo: x.motivo.trim() } : {}) } : y)),
+          }))
+          return null
+        },
+        agendarVisita: (v) => {
+          const s = getS()
+          if (!puedeVisita(s.ui.rol)) return 'Las visitas las agenda Comercial u Oficina Técnica.'
+          if (!v.responsable.trim()) return 'Indica el responsable.'
+          mutar((x) => ({ visitasTecnicas: [...x.visitasTecnicas, { ...v, id: uid('vt'), responsable: v.responsable.trim(), estado: 'agendada' }] }))
+          return null
+        },
+        cerrarVisita: (id, estado, notas) => {
+          const s = getS()
+          if (!puedeVisita(s.ui.rol)) return 'Tu rol no registra visitas.'
+          if (!notas.trim()) return estado === 'realizada' ? 'Registra las notas del levantamiento.' : 'Indica el motivo de la cancelación.'
+          mutar((x) => ({ visitasTecnicas: x.visitasTecnicas.map((v) => (v.id === id ? { ...v, estado, notas: notas.trim() } : v)) }))
+          return null
+        },
+        crearPropuesta: (leadId, anteriorId) => {
+          const s = getS()
+          if (!puedeComercial(s.ui.rol)) return { error: 'Las propuestas las prepara Comercial.' }
+          const l = s.leads.find((y) => y.id === leadId)
+          const t = hoy()
+          if (!l || !['nuevo', 'en_estudio', 'propuesta_enviada'].includes(estadoLead(l, t) ?? '')) return { error: 'El lead no está abierto.' }
+          const ant = s.propuestas.find((p) => p.id === anteriorId)
+          const id = uid('pr')
+          const numero = Math.max(0, ...s.propuestas.map((p) => p.numero)) + 1
+          const nueva: Propuesta = {
+            id, leadId, numero: ant?.numero ?? numero, version: ant ? Math.max(...s.propuestas.filter((p) => p.numero === ant.numero).map((p) => p.version)) + 1 : 1, anteriorId: ant?.id,
+            lineas: ant ? ant.lineas.map((x) => ({ ...x, id: uid('lp') })) : [], gg: ant?.gg ?? 0, margen: ant?.margen ?? 0.12, plazoDias: ant?.plazoDias ?? 90, validezHasta: t + 30,
+            exclusiones: ant?.exclusiones ?? 'Permisos y derechos municipales, aportes reembolsables y empalmes.', historial: [], creado: t, creadoPor: s.ui.usuario,
+          }
+          mutar((x) => ({
+            propuestas: [...x.propuestas, nueva],
+            // Preparar una propuesta pone al lead en estudio
+            leads: estadoLead(l, t) === 'nuevo' ? x.leads.map((y) => (y.id === leadId ? { ...y, responsable: y.responsable ?? s.ui.usuario, historial: [...y.historial, { fecha: t, estado: 'en_estudio' as const, por: s.ui.usuario }] } : y)) : x.leads,
+          }))
+          return { id }
+        },
+        editarPropuesta: (id, cambios) => {
+          const s = getS()
+          const p = s.propuestas.find((y) => y.id === id)
+          if (!p || estadoPropuesta(p, hoy()) !== 'borrador') return 'Solo se edita una propuesta en borrador.'
+          if (!puedeComercial(s.ui.rol)) return 'Tu rol no edita propuestas.'
+          if (cambios.margen != null && !(cambios.margen > -0.5 && cambios.margen < 0.9)) return 'El margen debe estar entre −50 % y 90 %.'
+          mutar((x) => ({ propuestas: x.propuestas.map((y) => (y.id === id ? { ...y, ...cambios } : y)) }))
+          return null
+        },
+        accionPropuesta: (id, accion, x = {}) => {
+          const s = getS()
+          const p = s.propuestas.find((y) => y.id === id)
+          if (!p) return 'La propuesta no existe.'
+          const t = hoy()
+          if (!accionesPropuesta(p, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esa acción en este estado.'
+          const lead = s.leads.find((l) => l.id === p.leadId)!
+          const tot = totalesPropuesta(p)
+          if (accion === 'enviar_revision' && (!p.lineas.length || tot.precio <= 0)) return 'La propuesta no tiene itemizado.'
+          const observado = clienteObservado(s, lead.clienteId, t)
+          if (accion === 'aprobar' && (margenBajo(p, s.config.umbrales.margenMinimo) || observado) && !x.texto?.trim())
+            return `Justifica el V°B°: ${[margenBajo(p, s.config.umbrales.margenMinimo) ? `margen bajo el mínimo de ${Math.round(s.config.umbrales.margenMinimo * 100)} % (RULE-005)` : '', observado ? `${observado} (RULE-004)` : ''].filter(Boolean).join(' y ')}.`
+          if ((accion === 'devolver' || accion === 'anular') && !x.texto?.trim()) return 'Indica el motivo.'
+          if (accion === 'rechazar' && !x.motivo) return 'Indica el motivo del rechazo.'
+          const estado: Record<AccionPropuesta, Propuesta['historial'][number]['estado'] | null> = {
+            enviar_revision: 'en_revision', devolver: 'borrador', aprobar: null, enviar: 'enviada', adjudicar: 'adjudicada', rechazar: 'rechazada', desierta: 'desierta', anular: 'anulada',
+          }
+          const paso = estado[accion] ? [{ fecha: t, estado: estado[accion]!, por: s.ui.usuario, ...(x.texto?.trim() ? { texto: x.texto.trim() } : {}) }] : []
+          const cliente = s.clientes.find((c) => c.id === lead.clienteId)
+          mutar((st) => {
+            let obras = st.obras
+            let partidas = st.partidas
+            let obraId: string | undefined
+            if (accion === 'adjudicar') {
+              // La obra nace en planificación con el itemizado de la oferta (precio prorrateado sobre el costo directo)
+              obraId = uid('obra')
+              obras = [...obras, {
+                id: obraId, nombre: lead.nombre, mandante: cliente?.nombre ?? '', lineaNegocio: lead.lineaNegocio, administrador: 'Por asignar', jefeTerreno: 'Por asignar', oficinaTecnica: 'Por asignar',
+                moneda: 'CLP', fechaInicio: x.fechaInicio ?? t + 14, plazoDias: p.plazoDias, multaDiaria: 0, margenOfertado: p.margen, ggPresupuesto: p.gg, estado: 'planificacion',
+              }]
+              partidas = [...partidas, ...p.lineas.map((l) => ({
+                id: `${obraId}_p${l.codigo}`, obraId: obraId!, codigo: l.codigo, capitulo: l.capitulo, descripcion: l.descripcion, unidad: l.unidad, cantidad: l.cantidad,
+                puVenta: Math.round(puCostoLinea(l) * tot.factor), recursos: l.recursos,
+              }))]
+            }
+            const estadoDeLead: EstadoLead | null = accion === 'enviar' ? 'propuesta_enviada' : accion === 'adjudicar' ? 'ganado' : accion === 'rechazar' || accion === 'desierta' ? 'perdido' : null
+            return {
+              obras, partidas,
+              propuestas: st.propuestas.map((y) => (y.id !== id ? y : {
+                ...y, historial: [...y.historial, ...paso],
+                ...(accion === 'aprobar' ? { aprobacion: { fecha: t, por: s.ui.usuario, ...(x.texto?.trim() ? { justificacion: x.texto.trim() } : {}) } } : {}),
+                ...(accion === 'devolver' ? { aprobacion: undefined } : {}),
+                ...(accion === 'rechazar' ? { motivoRechazo: x.motivo } : {}),
+                ...(obraId ? { obraId } : {}),
+              })),
+              leads: estadoDeLead && estadoLead(lead, t) !== estadoDeLead ? st.leads.map((l) => (l.id === lead.id ? {
+                ...l, historial: [...l.historial, { fecha: t, estado: estadoDeLead, por: s.ui.usuario }],
+                ...(estadoDeLead === 'perdido' ? { motivo: accion === 'desierta' ? 'Licitación desierta' : `Propuesta rechazada (${x.motivo})` } : {}),
+              } : l)) : st.leads,
+            }
+          })
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1366,7 +1514,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 20,
+      version: 21,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,
