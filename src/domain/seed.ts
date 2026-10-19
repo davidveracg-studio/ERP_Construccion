@@ -12,6 +12,7 @@ import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
 import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
 import { PLAZO_NCR } from './calidad'
+import { conIVA } from './finanzas'
 import { RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from './seguridad'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
@@ -20,6 +21,7 @@ import type {
   Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ItemRendicion,
   ProtocoloCalidad, NoConformidad, InspeccionCalidad, PasoDoc, EstadoProtocolo,
   TipoTareaCritica, ObservacionPreventiva, Incidente,
+  DocumentoTributario,
 } from './types'
 
 function rng(seed: number) {
@@ -983,6 +985,36 @@ function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rend
   return { cajasChicas: cajas, rendiciones }
 }
 
+/**
+ * Facturas electrónicas de la demo: una por EP facturado, con folio correlativo de la empresa en orden de
+ * emisión y aceptadas por el SII al día siguiente. La tercera fue rechazada (RUT del receptor) y se
+ * reemitió con el folio siguiente. El número de factura de cada EP pasa a ser el de su DTE.
+ */
+function documentosTributariosDemo(d: Datos, hoyDia: Dia): DocumentoTributario[] {
+  const H = hoyDia
+  const out: DocumentoTributario[] = []
+  let folio = 1000
+  const eps = d.estadosPago.filter((ep) => ep.facturado != null && ep.facturado <= H - 1 && ep.anulado == null).sort((a, b) => a.facturado! - b.facturado! || a.numero - b.numero)
+  eps.forEach((ep, k) => {
+    const obra = d.obras.find((o) => o.id === ep.obraId)!
+    const base = {
+      obraId: ep.obraId, tipo: 'factura' as const, receptor: obra.mandante, epId: ep.id, ...conIVA(ep.neto),
+      glosa: `${ep.tipo === 'anticipo' ? 'Anticipo' : `Estado de pago N° ${ep.numero}`} · ${obra.nombre}`, creadoPor: USUARIO_R09,
+    }
+    if (k === 2) {
+      const f = ep.facturado! - 1
+      out.push({ ...base, id: `dte_${++folio}`, folio, fecha: f, historial: [{ fecha: f, estado: 'emitido', por: USUARIO_R09 }, { fecha: f + 1, estado: 'rechazado_sii', por: USUARIO_R09, texto: 'RUT del receptor no coincide con el registrado en el SII' }], creado: f })
+    }
+    const f = ep.facturado!
+    out.push({
+      ...base, id: `dte_${++folio}`, folio, fecha: f, creado: f,
+      historial: [{ fecha: f, estado: 'emitido', por: USUARIO_R09 }, ...(f + 1 <= H - 1 ? [{ fecha: f + 1, estado: 'aceptado_sii' as const, por: USUARIO_R09 }] : [])],
+    })
+    ep.factura = `F-${folio}`
+  })
+  return out
+}
+
 /** Tareas críticas de las partidas de la demo (RULE-803). */
 const CRITICAS_DEMO: [RegExp, TipoTareaCritica][] = [[/^Excavación/, 'excavacion'], [/^Hormigón estructural|^Moldaje/, 'altura'], [/^Estructura metálica/, 'izaje'], [/^Cubierta/, 'altura']]
 const PREVENCIONISTA = 'Marcela Ríos'
@@ -1789,7 +1821,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 16
+export const VERSION_DEMO = 17
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1808,7 +1840,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1859,6 +1891,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, maquinariaDemo(d, hoyDia))
   // Caja chica y rendiciones
   Object.assign(d, cajaChicaDemo(d, hoyDia))
+  // Facturas electrónicas (DTE) de los EP facturados
+  d.documentosTributarios = documentosTributariosDemo(d, hoyDia)
   // Calidad: protocolos, NCR (con HH de retrabajo en los RDO) e inspecciones
   Object.assign(d, calidadDemo(d, hoyDia))
   // Seguridad: charlas, ART, inspecciones, observaciones, incidentes y medidas

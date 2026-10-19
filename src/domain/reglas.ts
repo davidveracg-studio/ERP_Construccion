@@ -366,8 +366,9 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         { etiqueta: 'Vencimiento', valor: fmtFecha(ep.vencimiento!) },
       ],
       porQue: `El mandante no ha pagado el EP N° ${ep.numero} y el plazo venció hace ${dias} días.`,
-      accionRequerida: dias > 15 ? 'Escalar la cobranza con el mandante y evaluar las medidas del contrato.' : 'Enviar recordatorio de pago al mandante.',
-      responsable: dias > 15 ? o.administrador : o.oficinaTecnica,
+      accionRequerida: dias >= 30 ? 'Escalado a Gerencia: gestionar con el mandante y evaluar la suspensión según el contrato.'
+        : dias >= 15 ? 'Escalado al administrador de obra: gestionar el pago con el mandante.' : 'Enviar recordatorio de pago al mandante (Finanzas).',
+      responsable: dias >= 30 ? 'Gerencia' : dias >= 15 ? o.administrador : 'Finanzas',
     })
   }
 

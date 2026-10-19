@@ -162,10 +162,12 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
       recepcion ? 'Devolución de retenciones (recepción provisoria)' : 'Devolución de retenciones al término', recepcion ? 'comprometido' : 'estimado')
 
   // --- Egresos registrados: proveedores, subcontratos y GG al plazo de pago ---
+  // Pagos a proveedores registrados por Finanzas (v1.3): el costo sale en la fecha de su pago
+  const pagoRegistrado = new Map(d.transacciones.filter((x) => x.tipo === 'pago' && x.refId && x.obraId === obra.id && x.fecha <= T).map((x) => [x.refId!, x.fecha]))
   for (const k of d.costos) {
     // Las remuneraciones salen de los RDO (más abajo)
     if (k.obraId !== obra.id || k.fecha > T || k.tipo === 'MO') continue
-    add(k.fecha + cond.diasPagoProveedores, -k.monto, k.tipo === 'GG' ? 'gastos_generales' : 'proveedores', k.proveedor ?? k.descripcion)
+    add(pagoRegistrado.get(k.id) ?? k.fecha + cond.diasPagoProveedores, -k.monto, k.tipo === 'GG' ? 'gastos_generales' : 'proveedores', k.proveedor ?? k.descripcion)
   }
 
   // Subcontratos "contra pago": el trabajo de un mes se paga unos días después de cobrar al

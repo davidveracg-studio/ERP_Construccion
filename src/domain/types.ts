@@ -839,6 +839,46 @@ export interface MedidaCorrectiva {
   creadoPor: string
 }
 
+// --- Finanzas (v1.3: 08 dominio 16, 10 §21) ---
+export type TipoDTE = 'factura' | 'nota_credito' | 'nota_debito'
+export type EstadoDTE = 'borrador' | 'emitido' | 'aceptado_sii' | 'rechazado_sii' | 'anulado'
+
+/** Documento tributario electrónico emitido al mandante (montos en pesos). */
+export interface DocumentoTributario {
+  id: string
+  obraId: string
+  tipo: TipoDTE
+  folio: number
+  fecha: Dia
+  receptor: string
+  /** EP que factura (o que corrige una nota de crédito). */
+  epId?: string
+  /** Factura que anula o corrige una nota de crédito o débito. */
+  referenciaId?: string
+  neto: number
+  iva: number
+  total: number
+  glosa: string
+  historial: PasoDoc<EstadoDTE>[]
+  creado: Dia
+  creadoPor: string
+}
+
+/** Pago o cobro registrado por Finanzas (pagos a proveedores de los costos registrados). */
+export interface TransaccionFinanciera {
+  id: string
+  obraId: string
+  fecha: Dia
+  tipo: 'pago' | 'cobro'
+  concepto: 'proveedor' | 'otro'
+  /** Documento que salda (id del costo). */
+  refId?: string
+  contraparte: string
+  documento?: string
+  monto: number
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */

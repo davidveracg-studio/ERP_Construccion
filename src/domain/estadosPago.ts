@@ -145,9 +145,10 @@ const PERMISOS: Partial<Record<EtapaEP, Partial<Record<AccionEP, Rol[]>>>> = {
   en_revision_interna: { presentar: ['R02'], devolver: ['R02'], anular: ['R02', 'R05'] },
   presentado: { aprobar: ['R11', 'R02'], observar: ['R11', 'R02'], anular: ['R01'] },
   observado: { presentar: ['R02'], anular: ['R01'] },
-  aprobado: { facturar: ['R01', 'R02', 'R05'] },
-  facturado: { pagar: ['R01', 'R02', 'R05'] },
-  pagado_parcial: { pagar: ['R01', 'R02', 'R05'] },
+  // v1.3: la factura (DTE) y el cobro los registra Finanzas (19 §6.7); Gerencia también
+  aprobado: { facturar: ['R09', 'R01'] },
+  facturado: { pagar: ['R09', 'R01'] },
+  pagado_parcial: { pagar: ['R09', 'R01'] },
 }
 
 export function accionesEP(ep: EstadoPago, t: Dia, rol: Rol): AccionEP[] {
