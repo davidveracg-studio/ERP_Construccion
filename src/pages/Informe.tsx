@@ -1,6 +1,7 @@
 // Informe semanal de control (RF-CTL-06): imprimible a PDF desde el navegador
 import { useMemo } from 'react'
 import { CurvaS } from '../components/graficos'
+import Comparacion4D from '../components/Comparacion4D'
 import { SemaforoEjecutivo } from '../components/Semaforo'
 import { Boton, Card } from '../components/ui'
 import { serieCurvaS } from '../domain/evm'
@@ -43,6 +44,11 @@ export default function Informe() {
         <div>Término proyectado: <b>{fmtFecha(c.terminoProyectado - 1)}</b> ({c.atrasoProyectado > 0 ? '+' : ''}{c.atrasoProyectado} d)</div>
       </section>
       <Card titulo="2. Curva S"><CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} /></Card>
+      {c.actualizado && (
+        <Card titulo="2b. Avance de la semana en el modelo 4D">
+          <Comparacion4D d={d} c={c} desde={Math.max(o.fechaInicio, c.corte - 7)} hasta={c.corte} titulo="Avance de la semana" />
+        </Card>
+      )}
       <section className="grid gap-4 sm:grid-cols-2">
         <div>
           <h2 className="mb-2 font-semibold">3. Qué explica la desviación de costo</h2>
