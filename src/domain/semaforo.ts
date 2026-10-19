@@ -1,4 +1,4 @@
-// Semáforo ejecutivo de 8 dimensiones (14 §5.3). Activas: plazo, costos, avance, productividad, compras y caja.
+// Semáforo ejecutivo de 8 dimensiones (14 §5.3). Activas: plazo, costos, avance, productividad, compras, calidad y caja.
 import type { CalcObra } from './evm'
 import type { Config, EstadoSemaforo } from './types'
 
@@ -19,7 +19,7 @@ export const DIMENSIONES: { dim: Dimension; nombre: string; kpi: string; disponi
   { dim: 'avance', nombre: 'Avance', kpi: 'Desviación' },
   { dim: 'productividad', nombre: 'Productividad', kpi: 'HH/unidad' },
   { dim: 'compras', nombre: 'Compras', kpi: 'OTIF' },
-  { dim: 'calidad', nombre: 'Calidad', kpi: 'NCR abiertas', disponibleEn: 'v1.3' },
+  { dim: 'calidad', nombre: 'Calidad', kpi: 'NCR abiertas' },
   { dim: 'seguridad', nombre: 'Seguridad', kpi: 'Accidentes', disponibleEn: 'v1.3' },
   { dim: 'caja', nombre: 'Caja', kpi: 'Mínimo 60 días' },
 ]
@@ -49,6 +49,8 @@ export function semaforo(c: CalcObra, cfg: Config): CeldaSemaforo[] {
       case 'caja': valor = c.caja.minimo60; estado = c.caja.estado; break
       // KAB-06: OTIF móvil de 90 días (ver compras.ts)
       case 'compras': valor = c.compras.otif; estado = c.compras.estado; break
+      // KCA-02: NCR abiertas (rojo si hay vencidas, ver calidad.ts)
+      case 'calidad': valor = c.calidad.ncrAbiertas; estado = c.calidad.estado; break
     }
     return { ...d, valor, estado }
   })
@@ -79,6 +81,8 @@ export function healthScore(c: CalcObra, cfg: Config): number | null {
     [norm(c.productividadDesv, 0, u.productividad[1], 0.3), 0.1],
     // Caja (14 §6: 10 %): mínimo a 60 días como fracción de la venta, contra el colchón
     [c.venta > 0 && c.caja.estado !== 'na' ? norm(c.caja.minimo60 / c.venta, u.cajaColchon ?? 0.02, 0, -0.05) : null, 0.1],
+    // Calidad (14 §5.1: 5 %): rework rate (KCA-07) y NCR abiertas (KCA-02)
+    [c.calidad.estado !== 'na' ? avg([[norm(c.calidad.reworkRate, 0.02, 0.03, 0.06), 0.5], [norm(c.calidad.ncrAbiertas, 3, 5, 10), 0.5]]) : null, 0.05],
   ]
   return avg(comps)
 }

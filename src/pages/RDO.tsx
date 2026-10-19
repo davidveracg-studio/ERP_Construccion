@@ -1,6 +1,7 @@
 // Reporte Diario de Obra del capataz: avance en cantidades + HH por partida (17 §4.1, 20 §6.1)
 import { useEffect, useMemo, useState } from 'react'
 import { Badge, Boton, Card, Titulo, cx, inputCls } from '../components/ui'
+import { estadoNCR, liberacionesPendientes } from '../domain/calidad'
 import { hhDeRegistro } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, uid } from '../domain/formato'
@@ -9,7 +10,7 @@ import { hhPorUnidad } from '../domain/presupuesto'
 import { CAUSAS_NP, type CausaNoProductiva, type Clima, type RDO, type RegistroHH } from '../domain/types'
 import type { CalcObra } from '../domain/evm'
 import type { Cuadrilla } from '../domain/types'
-import { useCalc } from '../store/hooks'
+import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
 
 const CLIMAS: [Clima, string, string][] = [['despejado', '☀', 'Despejado'], ['nublado', '☁', 'Nublado'], ['lluvia', '☔', 'Lluvia'], ['viento', '༄', 'Viento']]
@@ -112,18 +113,30 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
     return o
   })
   const [np, setNp] = useState<{ causa: CausaNoProductiva; trabajadores: number; horas: number } | null>(null)
+  const d = useDatosDominio()
+  const t = dia(fecha)
+  // NCR en las que la cuadrilla puede registrar HH de retrabajo (10 §5.3)
+  const ncrs = d.noConformidades.filter((n) => n.obraId === ui.obraId && ['abierta', 'en_correccion'].includes(estadoNCR(n, t) ?? ''))
+  const [rt, setRt] = useState<{ ncrId: string; trabajadores: number; horas: number } | null>(() => {
+    const h = existente?.hh.find((x) => x.ncrId)
+    return h ? { ncrId: h.ncrId!, trabajadores: h.trabajadores, horas: h.horasNormales } : null
+  })
+  const bloqueadas = new Map(partidasSemana.map((p) => [p.p.id, liberacionesPendientes(d, p.p.id, t)]).filter(([, l]) => (l as unknown[]).length) as [string, ReturnType<typeof liberacionesPendientes>][])
   const [obs, setObs] = useState(existente?.observaciones ?? '')
   const [msg, setMsg] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
 
   const fila = (id: string) => filas[id] ?? { cantidad: '', trabajadores: 0, horas: 9, extra: 0 }
   const setFila = (id: string, f: Partial<FilaPartida>) => setFilas({ ...filas, [id]: { ...fila(id), ...f } })
-  const hhTotal = Object.values(filas).reduce((s, f) => s + f.trabajadores * (f.horas + f.extra), 0) + (np ? np.trabajadores * np.horas : 0)
+  const hhTotal = Object.values(filas).reduce((s, f) => s + f.trabajadores * (f.horas + f.extra), 0) + (np ? np.trabajadores * np.horas : 0) + (rt ? rt.trabajadores * rt.horas : 0)
   const maxHH = cq.trabajadores * 11
 
   const armar = (estado: RDO['estado']): RDO => {
     const avances = Object.entries(filas).map(([partidaId, f]) => ({ partidaId, cantidad: Number(f.cantidad.replace(',', '.')) || 0 })).filter((a) => a.cantidad > 0)
     const hh: RegistroHH[] = Object.entries(filas).filter(([, f]) => f.trabajadores > 0).map(([partidaId, f]) => ({ partidaId, trabajadores: f.trabajadores, horasNormales: f.horas, horasExtra: f.extra }))
     if (np && np.trabajadores > 0) hh.push({ partidaId: null, trabajadores: np.trabajadores, horasNormales: np.horas, horasExtra: 0, causaNoProductiva: np.causa })
+    const ncr = rt && ncrs.find((n) => n.id === rt.ncrId)
+    if (rt && ncr && rt.trabajadores > 0) hh.push({ partidaId: ncr.partidaId, trabajadores: rt.trabajadores, horasNormales: rt.horas, horasExtra: 0, ncrId: ncr.id })
     return {
       id: existente?.id ?? uid('rdo'), obraId: ui.obraId, cuadrillaId, fecha: dia(fecha), clima, estado,
       autor: ui.usuario, avances, hh, observaciones: obs, motivoRechazo: undefined,
@@ -162,6 +175,7 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
                 return (
                   <div key={p.p.id} className="rounded-xl border border-slate-200 p-3">
                     {p.ordenCambio != null && <p className="mb-1"><Badge tono="ambar">Orden de cambio N° {p.ordenCambio} sin aprobar por el mandante</Badge></p>}
+                    {bloqueadas.has(p.p.id) && <p className="mb-1"><Badge tono="rojo">Bloqueada: falta aprobar el protocolo N° {bloqueadas.get(p.p.id)![0].numero} ({bloqueadas.get(p.p.id)![0].nombre})</Badge></p>}
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="font-medium">{p.p.codigo} {p.p.descripcion}</span>
                       <span className="text-xs text-slate-500">faltan {num(falta, 1)} {p.p.unidad}</span>
@@ -169,7 +183,7 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
                     <div className="mt-1 h-1.5 rounded bg-slate-100"><div className="h-full rounded bg-ev" style={{ width: `${p.avance * 100}%` }} /></div>
                     <label className="mt-3 block">
                       <span className="text-xs text-slate-500">Cantidad ejecutada hoy ({p.p.unidad})</span>
-                      <input inputMode="decimal" className={cx(inputCls, 'mt-1 h-12 text-lg')} value={f.cantidad} onChange={(e) => setFila(p.p.id, { cantidad: e.target.value })} placeholder="0" />
+                      <input inputMode="decimal" className={cx(inputCls, 'mt-1 h-12 text-lg')} value={f.cantidad} disabled={bloqueadas.has(p.p.id)} onChange={(e) => setFila(p.p.id, { cantidad: e.target.value })} placeholder="0" />
                     </label>
                     {p.rendPres != null && (
                       <div className="mt-3 grid grid-cols-3 gap-2">
@@ -200,6 +214,23 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
                 </>
               ) : <button onClick={() => setNp({ causa: 'espera_material', trabajadores: cq.trabajadores, horas: 1 })} className="w-full text-sm text-marca">+ Registrar HH no productivas (esperas, clima…)</button>}
             </div>
+            {ncrs.length > 0 && (
+              <div className="mt-3 rounded-xl border border-dashed border-slate-300 p-3">
+                {rt ? (
+                  <>
+                    <div className="text-sm font-medium">HH de retrabajo (corrección de una NCR)</div>
+                    <select className={cx(inputCls, 'mt-2')} value={rt.ncrId} onChange={(e) => setRt({ ...rt, ncrId: e.target.value })}>
+                      {ncrs.map((n) => <option key={n.id} value={n.id}>NCR N° {n.numero} · {n.descripcion}</option>)}
+                    </select>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <Stepper etiqueta="Trabajadores" valor={rt.trabajadores} onChange={(v) => setRt({ ...rt, trabajadores: v })} max={cq.trabajadores} />
+                      <Stepper etiqueta="Horas c/u" valor={rt.horas} onChange={(v) => setRt({ ...rt, horas: v })} max={10} paso={0.5} />
+                    </div>
+                    <button onClick={() => setRt(null)} className="mt-2 text-xs text-slate-500">Quitar</button>
+                  </>
+                ) : <button onClick={() => setRt({ ncrId: ncrs[0].id, trabajadores: 2, horas: 2 })} className="w-full text-sm text-marca">+ Registrar HH de retrabajo ({ncrs.length} NCR por corregir)</button>}
+              </div>
+            )}
             <p className="tabular mt-3 text-sm text-slate-600">Total HH del día: <span className="font-semibold">{num(hhTotal, 1)}</span> · dotación {cq.trabajadores} trabajadores</p>
           </Card>
 
@@ -211,10 +242,15 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
             <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{advertencias.map((a) => <p key={a}>⚠ {a}</p>)}</div>
           )}
           {msg && <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{msg}</div>}
+          {err && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-900">{err}</div>}
 
           <div className="sticky bottom-0 -mx-4 flex gap-2 bg-slate-100/95 px-4 py-3 backdrop-blur">
             <Boton variante="secundario" className="h-14 flex-1" onClick={() => { guardar(armar('borrador')); setMsg('Borrador guardado en este dispositivo.') }}>Guardar borrador</Boton>
-            <Boton className="h-14 flex-[2] text-base" onClick={() => { guardar(armar('enviado')); setMsg(navigator.onLine ? 'Reporte enviado. El jefe de terreno lo validará.' : 'Sin señal: guardado en el teléfono, se enviará al recuperar conexión.') }}>
+            <Boton className="h-14 flex-[2] text-base" onClick={() => {
+              const bloq = Object.entries(filas).find(([pid, f]) => bloqueadas.has(pid) && (Number(f.cantidad.replace(',', '.')) || 0) > 0)
+              if (bloq) { setMsg(null); setErr(`No se puede reportar avance en una partida con protocolo de liberación sin aprobar (${bloqueadas.get(bloq[0])![0].nombre}).`); return }
+              setErr(null)
+              guardar(armar('enviado')); setMsg(navigator.onLine ? 'Reporte enviado. El jefe de terreno lo validará.' : 'Sin señal: guardado en el teléfono, se enviará al recuperar conexión.') }}>
               Enviar reporte
             </Boton>
           </div>
@@ -245,6 +281,7 @@ export function ResumenRDO({ r }: { r: RDO }) {
         const p = partidas.find((x) => x.id === a.partidaId)
         return <div key={a.partidaId} className="flex justify-between gap-2"><span>{nombre(a.partidaId)}</span><span className="tabular">{num(a.cantidad, 2)} {p?.unidad}{h && ` · ${num(hhDeRegistro(h), 1)} HH`}</span></div>
       })}
+      {r.hh.filter((h) => h.ncrId).map((h, i) => <div key={`rt${i}`} className="flex justify-between text-red-700"><span>Retrabajo (NCR)</span><span className="tabular">{num(hhDeRegistro(h), 1)} HH</span></div>)}
       {r.hh.filter((h) => h.causaNoProductiva).map((h, i) => <div key={i} className="flex justify-between text-amber-700"><span>No productivas: {CAUSAS_NP[h.causaNoProductiva!]}</span><span className="tabular">{num(hhDeRegistro(h), 1)} HH</span></div>)}
       {r.observaciones && <p className="text-slate-500">“{r.observaciones}”</p>}
     </div>

@@ -674,6 +674,76 @@ export interface Rendicion {
   creadoPor: string
 }
 
+// --- Calidad (v1.3: 08 dominio 14, 10 §11 y §22) ---
+export type EstadoProtocolo = 'pendiente' | 'en_inspeccion' | 'aprobado' | 'rechazado' | 'aprobado_ito'
+
+export interface ItemChecklist {
+  texto: string
+  ok?: boolean
+}
+
+export interface ProtocoloCalidad {
+  id: string
+  obraId: string
+  partidaId: string
+  numero: number
+  nombre: string
+  /** liberación: bloquea el avance de la partida hasta aprobarse (ej.: antes de hormigonar). */
+  tipo: 'liberacion' | 'control'
+  /** RULE-103: obligatorio para la recepción provisoria. */
+  obligatorio: boolean
+  /** Requiere V°B° del ITO del mandante. */
+  requiereITO: boolean
+  /** Cuadrilla o subcontratista que ejecuta el trabajo. */
+  responsable: string
+  /** Ubicación o tramo inspeccionado (ej.: "Losa piso 3, ejes A–D"). */
+  ubicacion: string
+  checklist: ItemChecklist[]
+  programado: Dia
+  observaciones?: string
+  /** Reinspección de un protocolo rechazado. */
+  reinspeccionDe?: string
+  historial: PasoDoc<EstadoProtocolo>[]
+  creado: Dia
+  creadoPor: string
+}
+
+export interface InspeccionCalidad {
+  id: string
+  obraId: string
+  partidaId: string | null
+  tipo: 'programada' | 'no_programada'
+  programada: Dia
+  inspector: string
+  /** Fecha en que se realizó y su resultado. */
+  realizada?: { fecha: Dia; conforme: boolean; hallazgos: string }
+}
+
+export type EstadoNCR = 'abierta' | 'en_correccion' | 'verificada' | 'cerrada' | 'anulada'
+export type OrigenNCR = 'protocolo' | 'inspeccion' | 'ito' | 'hallazgo'
+
+export interface NoConformidad {
+  id: string
+  obraId: string
+  partidaId: string
+  numero: number
+  origen: OrigenNCR
+  protocoloId?: string
+  inspeccionId?: string
+  descripcion: string
+  causa?: string
+  /** Cuadrilla o subcontratista que corrige. */
+  responsable: string
+  accionCorrectiva?: string
+  /** Plazo de corrección (RULE-112). */
+  plazo: Dia
+  /** Materiales del retrabajo, consolidados al cerrar (las HH salen de los RDO). */
+  costoMateriales?: number
+  historial: PasoDoc<EstadoNCR>[]
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -876,6 +946,8 @@ export interface RegistroHH {
   horasNormales: number
   horasExtra: number
   causaNoProductiva?: CausaNoProductiva
+  /** HH de retrabajo (v1.3): corrección de la no conformidad indicada; se imputan a su partida. */
+  ncrId?: string
 }
 
 export type EstadoRDO = 'borrador' | 'enviado' | 'validado' | 'rechazado'

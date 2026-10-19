@@ -2,6 +2,7 @@
 // Fórmulas en docs 14 §3–§4.
 import { calcularCaja, type ResumenCaja } from './caja'
 import { compromisoOC, indicadoresCompras, type IndicadoresCompras } from './compras'
+import { indicadoresCalidad, type IndicadoresCalidad } from './calidad'
 import { calcularCPM, type ResultadoCPM } from './cpm'
 import { programaDe, type Datos } from './datos'
 import { diaSemana, diasHabilesEntre } from './fechas'
@@ -116,6 +117,7 @@ export interface CalcObra {
   caja: ResumenCaja
   /** Indicadores de abastecimiento (v1.2, semáforo Compras). */
   compras: IndicadoresCompras
+  calidad: IndicadoresCalidad
 }
 
 const TIPOS: TipoRecurso[] = ['MO', 'MAT', 'EQ', 'SUB', 'OTRO']
@@ -404,6 +406,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   // La caja usa el EVM ya calculado (costo por completar, término proyectado)
   calculado.caja = calcularCaja(d, calculado)
   calculado.compras = indicadoresCompras(d.ordenesCompra, d.solicitudesMaterial, obraId, corte)
+  calculado.calidad = indicadoresCalidad(d, obraId, corte, calculado.ac)
   return calculado
 }
 

@@ -9,13 +9,15 @@ export function valorCelda(c: CeldaSemaforo): string {
   if (c.dim === 'productividad') return signoPct(c.valor)
   if (c.dim === 'caja') return mm(c.valor ?? 0)
   if (c.dim === 'compras') return pct(c.valor ?? 0, 0)
+  if (c.dim === 'calidad') return `${c.valor ?? 0} NCR`
   return idx(c.valor)
 }
 
-/** Ruta que explica una dimensión: caja y compras tienen su propia pantalla. */
+/** Ruta que explica una dimensión: caja, compras y calidad tienen su propia pantalla. */
 export function rutaDimension(dim: CeldaSemaforo['dim'], obraId?: string) {
   if (dim === 'caja') return '/caja'
   if (dim === 'compras') return '/compras'
+  if (dim === 'calidad') return '/calidad'
   return `/explicacion/${dim}${obraId ? `?obra=${obraId}` : ''}`
 }
 

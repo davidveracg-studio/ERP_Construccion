@@ -32,12 +32,16 @@ import {
 } from '../domain/subcontratos'
 import { acreditacion, f301Vigente, puedeCargarDocumentos, puedeRevisarDocumentos, subcontratistaDeR10 } from '../domain/cumplimiento'
 import { accionesParte, costoParte, erroresParte, estadoParte, puedeEditarEquipos, puedeRegistrarParte, type AccionParte } from '../domain/maquinaria'
+import {
+  accionesNCR, accionesProtocolo, ESTADO_POR_ACCION, ESTADO_POR_ACCION_NCR, estadoProtocolo, PLAZO_NCR, protocolosFaltantes, puedeCrearNCR, puedeCrearProtocolo,
+  puedeProgramarInspeccion, validarAccionProtocolo, type AccionNCR, type AccionProtocolo,
+} from '../domain/calidad'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
-  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion,
+  EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion, ProtocoloCalidad, NoConformidad, InspeccionCalidad,
 } from '../domain/types'
 
 export interface UI {
@@ -183,6 +187,15 @@ export interface Acciones {
   revisarItemRendicion: (rendicionId: string, itemId: string, estado: 'aprobado' | 'rechazado', motivo?: string) => string | null
   /** Finanzas repone el fondo por lo aprobado: es costo real de las partidas o de GG. */
   reponerFondo: (id: string) => string | null
+  crearProtocolo: (p: Omit<ProtocoloCalidad, 'id' | 'numero' | 'historial' | 'creado' | 'creadoPor'>) => string | null
+  marcarChecklist: (id: string, indice: number, ok: boolean) => void
+  /** Rechazar abre una NCR y programa la reinspección (RULE-104). */
+  accionProtocolo: (id: string, accion: AccionProtocolo, observaciones?: string) => string | null
+  crearNCR: (n: Pick<NoConformidad, 'obraId' | 'partidaId' | 'origen' | 'descripcion' | 'responsable' | 'plazo'> & Partial<Pick<NoConformidad, 'inspeccionId' | 'protocoloId'>>) => string | null
+  accionNCR: (id: string, accion: AccionNCR, x?: { causa?: string; accionCorrectiva?: string; costoMateriales?: number; texto?: string }) => string | null
+  programarInspeccion: (i: Omit<InspeccionCalidad, 'id' | 'realizada'>) => string | null
+  /** Si no es conforme abre una NCR por los hallazgos. */
+  realizarInspeccion: (id: string, r: { conforme: boolean; hallazgos: string; partidaId?: string; responsable?: string }) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -464,6 +477,10 @@ export const useStore = create<Estado>()(
           const t = hoy()
           if (r.tipo === 'provisoria' && r.resultado === 'recibida' && calcularObra(s, r.obraId, t).avanceReal < AVANCE_MINIMO_RECEPCION)
             return 'La obra aún no está terminada: la recepción provisoria requiere el 100 % de avance.'
+          if (r.tipo === 'provisoria' && r.resultado === 'recibida') {
+            const faltan = protocolosFaltantes(s, r.obraId, t)
+            if (faltan.length) return `RULE-103: faltan protocolos obligatorios aprobados (${faltan.slice(0, 4).map((p) => `N° ${p.numero} ${p.nombre}`).join('; ')}${faltan.length > 4 ? '…' : ''}).`
+          }
           if (r.tipo === 'definitiva') {
             const prov = recepcionProvisoria(s.recepciones, r.obraId, t)
             if (!prov) return 'Primero debe registrarse la recepción provisoria.'
@@ -1083,6 +1100,98 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ rendiciones: x.rendiciones.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'aprobada' as const, por: s.ui.usuario }] } : y)), costos: [...x.costos, ...costos] }))
           return null
         },
+        crearProtocolo: (p) => {
+          const s = getS()
+          if (!puedeCrearProtocolo(s.ui.rol)) return 'Los protocolos los programa el jefe de terreno o el administrador.'
+          if (!p.nombre.trim() || !p.partidaId) return 'Indica el protocolo y la partida.'
+          if (!p.checklist.length) return 'Agrega al menos un punto al checklist.'
+          const numero = Math.max(0, ...s.protocolosCalidad.filter((x) => x.obraId === p.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ protocolosCalidad: [...x.protocolosCalidad, { ...p, id: uid('pq'), numero, nombre: p.nombre.trim(), historial: [], creado: hoy(), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        marcarChecklist: (id, indice, ok) =>
+          mutar((s) => ({
+            protocolosCalidad: s.protocolosCalidad.map((p) => (p.id !== id || estadoProtocolo(p, hoy()) !== 'en_inspeccion' ? p : { ...p, checklist: p.checklist.map((i, k) => (k === indice ? { ...i, ok } : i)) })),
+          })),
+        accionProtocolo: (id, accion, observaciones) => {
+          const s = getS()
+          const p = s.protocolosCalidad.find((x) => x.id === id)
+          if (!p) return 'El protocolo no existe.'
+          const t = hoy()
+          if (!accionesProtocolo(p, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esa acción en este estado.'
+          const error = validarAccionProtocolo(p, accion, observaciones)
+          if (error) return error
+          const paso = { fecha: t, estado: ESTADO_POR_ACCION[accion], por: s.ui.usuario, ...(observaciones?.trim() ? { texto: observaciones.trim() } : {}) }
+          mutar((x) => {
+            const protocolos = x.protocolosCalidad.map((y) => (y.id === id ? { ...y, historial: [...y.historial, paso], ...(accion === 'rechazar' ? { observaciones: observaciones!.trim() } : {}) } : y))
+            if (accion !== 'rechazar') return { protocolosCalidad: protocolos }
+            // RULE-104: NCR al responsable y protocolo de reinspección (checklist en blanco)
+            const numero = Math.max(0, ...x.protocolosCalidad.filter((y) => y.obraId === p.obraId).map((y) => y.numero)) + 1
+            const re: ProtocoloCalidad = { ...p, id: uid('pq'), numero, checklist: p.checklist.map((i) => ({ texto: i.texto })), observaciones: undefined, programado: t + 1, reinspeccionDe: p.id, historial: [], creado: t, creadoPor: s.ui.usuario }
+            const nNcr = Math.max(0, ...x.noConformidades.filter((y) => y.obraId === p.obraId).map((y) => y.numero)) + 1
+            const ncr: NoConformidad = {
+              id: uid('nc'), obraId: p.obraId, partidaId: p.partidaId, numero: nNcr, origen: 'protocolo', protocoloId: p.id,
+              descripcion: `${p.nombre} (${p.ubicacion}): ${observaciones!.trim()}`, responsable: p.responsable, plazo: t + PLAZO_NCR, historial: [], creado: t, creadoPor: s.ui.usuario,
+            }
+            return { protocolosCalidad: [...protocolos, re], noConformidades: [...x.noConformidades, ncr] }
+          })
+          return null
+        },
+        crearNCR: (n) => {
+          const s = getS()
+          if (!puedeCrearNCR(s.ui.rol)) return 'Las NCR las abre el jefe de terreno o el administrador.'
+          if (!n.descripcion.trim() || !n.partidaId || !n.responsable.trim()) return 'Indica la partida, la descripción y el responsable.'
+          const t = hoy()
+          if (n.plazo < t) return 'El plazo de corrección no puede ser anterior a hoy.'
+          const numero = Math.max(0, ...s.noConformidades.filter((x) => x.obraId === n.obraId).map((x) => x.numero)) + 1
+          mutar((x) => ({ noConformidades: [...x.noConformidades, { ...n, id: uid('nc'), numero, descripcion: n.descripcion.trim(), responsable: n.responsable.trim(), historial: [], creado: t, creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        accionNCR: (id, accion, x = {}) => {
+          const s = getS()
+          const n = s.noConformidades.find((y) => y.id === id)
+          if (!n) return 'La NCR no existe.'
+          const t = hoy()
+          if (!accionesNCR(n, t, s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esa acción en este estado.'
+          if (accion === 'corregir' && !x.accionCorrectiva?.trim()) return 'Indica la acción correctiva.'
+          if (accion === 'anular' && !x.texto?.trim()) return 'Indica el motivo de la anulación.'
+          const paso = { fecha: t, estado: ESTADO_POR_ACCION_NCR[accion], por: s.ui.usuario, ...(x.texto?.trim() ? { texto: x.texto.trim() } : {}) }
+          mutar((st) => ({
+            noConformidades: st.noConformidades.map((y) => (y.id !== id ? y : {
+              ...y, historial: [...y.historial, paso],
+              ...(x.causa?.trim() ? { causa: x.causa.trim() } : {}),
+              ...(x.accionCorrectiva?.trim() ? { accionCorrectiva: x.accionCorrectiva.trim() } : {}),
+              ...(accion === 'cerrar' && x.costoMateriales ? { costoMateriales: x.costoMateriales } : {}),
+            })),
+          }))
+          return null
+        },
+        programarInspeccion: (i) => {
+          const s = getS()
+          if (!puedeProgramarInspeccion(s.ui.rol)) return 'Las inspecciones las programa el jefe de terreno o el administrador.'
+          if (!i.inspector.trim()) return 'Indica el inspector.'
+          mutar((x) => ({ inspeccionesCalidad: [...x.inspeccionesCalidad, { ...i, id: uid('iq'), inspector: i.inspector.trim() }] }))
+          return null
+        },
+        realizarInspeccion: (id, r) => {
+          const s = getS()
+          const i = s.inspeccionesCalidad.find((x) => x.id === id)
+          if (!i || i.realizada) return 'La inspección ya fue registrada.'
+          if (s.ui.rol !== 'R03' && s.ui.rol !== 'R02') return 'La inspección la registra el jefe de terreno o el administrador.'
+          if (!r.conforme && (!r.hallazgos.trim() || !(r.partidaId ?? i.partidaId) || !r.responsable?.trim())) return 'Indica los hallazgos, la partida y el responsable de corregir.'
+          const t = hoy()
+          mutar((x) => {
+            const inspeccionesCalidad = x.inspeccionesCalidad.map((y) => (y.id === id ? { ...y, realizada: { fecha: t, conforme: r.conforme, hallazgos: r.hallazgos.trim() } } : y))
+            if (r.conforme) return { inspeccionesCalidad }
+            const numero = Math.max(0, ...x.noConformidades.filter((y) => y.obraId === i.obraId).map((y) => y.numero)) + 1
+            const ncr: NoConformidad = {
+              id: uid('nc'), obraId: i.obraId, partidaId: (r.partidaId ?? i.partidaId)!, numero, origen: 'inspeccion', inspeccionId: id,
+              descripcion: r.hallazgos.trim(), responsable: r.responsable!.trim(), plazo: t + PLAZO_NCR, historial: [], creado: t, creadoPor: x.ui.usuario,
+            }
+            return { inspeccionesCalidad, noConformidades: [...x.noConformidades, ncr] }
+          })
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1090,7 +1199,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 17,
+      version: 18,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

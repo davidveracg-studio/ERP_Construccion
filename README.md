@@ -22,7 +22,7 @@ La app tiene dos modos según las variables de entorno:
 
 ### Configurar Supabase (una vez)
 
-1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql`, `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM) `0004_estados_pago.sql` (estados de pago) y `0005_v11_oficina_tecnica.sql` (tablas de la v1.1 y bucket de documentos) y `0006_v12_abastecimiento.sql` (tablas de la v1.2 y roles R07/R09/R10/R11). Todos son idempotentes.
+1. **SQL Editor** → ejecutar `supabase/migrations/0001_esquema_inicial.sql`, luego `0002_demo.sql`, `0003_modelos_ifc.sql` (bucket de Storage para los modelos BIM) `0004_estados_pago.sql` (estados de pago) y `0005_v11_oficina_tecnica.sql` (tablas de la v1.1 y bucket de documentos) y `0006_v12_abastecimiento.sql` (tablas de la v1.2 y roles R07/R09/R10/R11) y `0007_v13_calidad_seguridad_finanzas.sql` (tablas de la v1.3 y rol R08). Todos son idempotentes.
 2. **Authentication → Sign In / Providers** → activar *Allow anonymous sign-ins*.
 3. Copiar `.env.example` a `.env.local` con la URL y la clave **anon public** del proyecto. La clave `service_role` nunca va en el frontend.
 
@@ -52,6 +52,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Portal subcontratista | `/subcontratista` (rol R10) — sus subcontratos en todas las obras, lo validado por cobrar, preparar y presentar sus EP, estado y motivo de bloqueo, carga de documentos y registro de trabajadores; sin costos ni precios de venta de la constructora | v1.2 · 07, 19 §5 |
 | Maquinaria | `/maquinaria` — equipos propios, arrendados o de subcontratista con tarifa por hora, día o mes; parte diario (horas disponibles, trabajadas por partida, improductivas con causa, mantención, combustible y horómetro) que valida terreno y, validado, es costo real de equipo por partida; utilización, improductivas, costo hora real vs presupuestado, consumo, disponibilidad mecánica, mantenciones y rendimiento (KMQ-01…07); RULE-205 (baja utilización de equipos de costo fijo) y RULE-206 (improductivas) | v1.2 · 08, 10 §29, 12, 14 |
 | Caja chica y rendiciones | `/caja-chica` — fondo fijo por obra (lo abre y cierra Finanzas, R09); rendición con comprobante e imputación a partida o GG; revisión por ítem (el administrador hasta 10 UF, sobre eso Finanzas o Gerencia, RN-P04); **RULE-401** si se presenta con gastos sin respaldo, sin imputar, sobre el tope o sobre el fondo; Finanzas repone el fondo por lo aprobado, que pasa a costo real. Con el rol **R09 Finanzas** también pagan los EP de subcontratistas y se cierran las OC con factura (RN-P06) | v1.2 · 08, 10 §17, 12, 19 |
+| Calidad | `/calidad` — protocolos por partida con checklist (los de **liberación** bloquean el avance de la partida en el RDO hasta aprobarse; los **obligatorios** condicionan la recepción provisoria, **RULE-103**); el capataz inicia, el jefe de terreno aprueba con el checklist completo o rechaza con observaciones, y el ITO da su V°B° desde el portal del mandante. Un rechazo abre una **NCR** y programa la reinspección (**RULE-104**); las HH de corrección se registran en el RDO como **retrabajo**. Indicadores KCA-01/02/03/07/08/09, **RULE-111** (rework rate) y **RULE-112** (NCR vencida); la dimensión Calidad del semáforo y del Health Score queda activa | v1.3 · 08, 10 §11 y §22, 12, 14 |
 | Portal mandante | `/mandante` (rol R11) — avance en % y curva S, EP y OC por aprobar, RFI y submittals por responder, Libro de Obra, historial; sin costos, márgenes ni alertas internas | v1.1 · 07, 19 §5 |
 | Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
@@ -81,6 +82,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   cumplimiento.ts Documentación laboral, acreditación (RULE-702) y bloqueo de pago por F30-1 (RULE-701)
   maquinaria.ts   Equipos, partes diarios, costo por partida e indicadores KMQ
   cajaChica.ts    Caja chica, rendiciones, tope por ítem y RULE-401
+  calidad.ts      Protocolos, liberaciones, NCR, retrabajo e indicadores KCA (RULE-103/104/111/112)
   ordenesCambio.ts Órdenes de cambio: etapas, umbral RN-P04, efectos de la aprobación y vigencia de partidas
   estadosPago.ts  Ciclo del EP: etapas, permisos por rol, cubicación, reajuste, indicadores y RULE-403
   caja.ts         Flujo de caja: estados de pago, cobros, pagos, proyección y mínimo a 60 días
