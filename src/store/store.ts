@@ -40,13 +40,14 @@ import {
   accionesIncidente, ESTADO_POR_ACCION_INC, puedeART, puedeCharla, puedeCumplirMedida, puedeGestionarSST, puedeMarcarCritica, puedeObservar, puedeReportarIncidente,
   validarAccionIncidente, type AccionIncidente,
 } from '../domain/seguridad'
+import { codigoDTE, conIVA, estadoDTE, puedeAnularConNC, puedeFacturar, puedeTesoreria, siguienteFolio } from '../domain/finanzas'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
   EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion, ProtocoloCalidad, NoConformidad, InspeccionCalidad,
-  CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, TipoTareaCritica,
+  CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, TipoTareaCritica, DocumentoTributario,
 } from '../domain/types'
 
 export interface UI {
@@ -215,6 +216,12 @@ export interface Acciones {
   crearMedida: (m: Omit<MedidaCorrectiva, 'id' | 'creado' | 'creadoPor' | 'cumplida'>) => string | null
   cumplirMedida: (id: string, evidencia: string) => string | null
   marcarTareaCritica: (partidaId: string, tarea: TipoTareaCritica | null) => string | null
+  /** Respuesta del SII a un DTE (la integración queda simulada: la registra Finanzas). Un rechazo deja el EP por facturar. */
+  respuestaSII: (id: string, aceptado: boolean, motivo?: string) => string | null
+  /** Nota de crédito total que anula la factura de un EP aún no cobrado. */
+  anularConNotaCredito: (facturaId: string, motivo: string) => string | null
+  /** Registra el pago de una factura de proveedor (costo). */
+  pagarCosto: (costoId: string) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -422,8 +429,14 @@ export const useStore = create<Estado>()(
           if (!accionesEP(ep, hoy(), s.ui.rol).includes(accion)) return 'Tu rol no puede hacer esta acción en esta etapa.'
           try {
             const obra = s.obras.find((o) => o.id === ep.obraId)
-            const nuevo = aplicarAccion(ep, accion, { fecha: datos.fecha ?? hoy(), autor: s.ui.usuario, ...datos }, condicionesDe(obra ?? {}))
-            mutar((x) => ({ estadosPago: x.estadosPago.map((e) => (e.id === id ? nuevo : e)) }))
+            const fecha = datos.fecha ?? hoy()
+            // v1.3: facturar emite la factura electrónica (DTE) con el folio siguiente
+            const dte: DocumentoTributario | null = accion === 'facturar' ? {
+              id: uid('dte'), obraId: ep.obraId, tipo: 'factura', folio: siguienteFolio(s.documentosTributarios, 'factura'), fecha, receptor: obra?.mandante ?? '', epId: ep.id,
+              ...conIVA(ep.neto), glosa: `${ep.tipo === 'anticipo' ? 'Anticipo' : `Estado de pago N° ${ep.numero}`} · ${obra?.nombre ?? ''}`, historial: [{ fecha, estado: 'emitido', por: s.ui.usuario }], creado: fecha, creadoPor: s.ui.usuario,
+            } : null
+            const nuevo = aplicarAccion(ep, accion, { autor: s.ui.usuario, ...datos, fecha, ...(dte ? { factura: codigoDTE(dte) } : {}) }, condicionesDe(obra ?? {}))
+            mutar((x) => ({ estadosPago: x.estadosPago.map((e) => (e.id === id ? nuevo : e)), ...(dte ? { documentosTributarios: [...x.documentosTributarios, dte] } : {}) }))
             return null
           } catch (e) {
             return e instanceof Error ? e.message : String(e)
@@ -1305,6 +1318,47 @@ export const useStore = create<Estado>()(
           mutar((x) => ({ partidas: x.partidas.map((p) => (p.id !== partidaId ? p : tarea ? { ...p, tareaCritica: tarea } : (({ tareaCritica: _t, ...r }) => r)(p))) }))
           return null
         },
+        respuestaSII: (id, aceptado, motivo) => {
+          const s = getS()
+          if (!puedeFacturar(s.ui.rol)) return 'La respuesta del SII la registra Finanzas.'
+          const doc = s.documentosTributarios.find((x) => x.id === id)
+          const t = hoy()
+          if (!doc || estadoDTE(doc, t) !== 'emitido') return 'El documento no está esperando respuesta del SII.'
+          if (!aceptado && !motivo?.trim()) return 'Indica el motivo del rechazo del SII.'
+          mutar((x) => ({
+            documentosTributarios: x.documentosTributarios.map((y) => (y.id === id ? { ...y, historial: [...y.historial, { fecha: t, estado: aceptado ? 'aceptado_sii' as const : 'rechazado_sii' as const, por: s.ui.usuario, ...(motivo?.trim() ? { texto: motivo.trim() } : {}) }] } : y)),
+            // Factura rechazada: el EP vuelve a "por facturar"
+            estadosPago: aceptado || doc.tipo !== 'factura' ? x.estadosPago : x.estadosPago.map((e) => (e.id === doc.epId && e.factura === codigoDTE(doc) ? { ...e, facturado: undefined, factura: undefined, vencimiento: undefined } : e)),
+          }))
+          return null
+        },
+        anularConNotaCredito: (facturaId, motivo) => {
+          const s = getS()
+          if (!puedeFacturar(s.ui.rol)) return 'Las notas de crédito las emite Finanzas.'
+          const f = s.documentosTributarios.find((x) => x.id === facturaId)
+          const t = hoy()
+          const ep = s.estadosPago.find((e) => e.id === f?.epId)
+          if (!f || !puedeAnularConNC(f, ep, t)) return 'Solo se anula con nota de crédito una factura vigente de un EP sin cobros.'
+          if (!motivo.trim()) return 'Indica el motivo de la nota de crédito.'
+          const nc: DocumentoTributario = {
+            id: uid('dte'), obraId: f.obraId, tipo: 'nota_credito', folio: siguienteFolio(s.documentosTributarios, 'nota_credito'), fecha: t, receptor: f.receptor, epId: f.epId, referenciaId: f.id,
+            neto: f.neto, iva: f.iva, total: f.total, glosa: `Anula ${codigoDTE(f)}: ${motivo.trim()}`, historial: [{ fecha: t, estado: 'emitido', por: s.ui.usuario }], creado: t, creadoPor: s.ui.usuario,
+          }
+          mutar((x) => ({
+            documentosTributarios: [...x.documentosTributarios.map((y) => (y.id === f.id ? { ...y, historial: [...y.historial, { fecha: t, estado: 'anulado' as const, por: s.ui.usuario, texto: `${codigoDTE(nc)}: ${motivo.trim()}` }] } : y)), nc],
+            estadosPago: x.estadosPago.map((e) => (e.id === f.epId ? { ...e, facturado: undefined, factura: undefined, vencimiento: undefined } : e)),
+          }))
+          return null
+        },
+        pagarCosto: (costoId) => {
+          const s = getS()
+          if (!puedeTesoreria(s.ui.rol)) return 'Los pagos los registra Finanzas.'
+          const k = s.costos.find((x) => x.id === costoId)
+          if (!k) return 'El documento no existe.'
+          if (s.transacciones.some((x) => x.refId === costoId)) return 'Ese documento ya está pagado.'
+          mutar((x) => ({ transacciones: [...x.transacciones, { id: uid('tx'), obraId: k.obraId, fecha: hoy(), tipo: 'pago', concepto: 'proveedor', refId: k.id, contraparte: k.proveedor ?? k.descripcion, documento: k.documento, monto: k.monto, creadoPor: s.ui.usuario }] }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1312,7 +1366,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 19,
+      version: 20,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

@@ -315,7 +315,6 @@ function Generadores({ generadores, unidad, total, editable, onCambiar }: { gene
 function AccionModal({ ep, accion, onCerrar }: { ep: EstadoPago; accion: AccionEP; onCerrar: () => void }) {
   const ejecutar = useStore((s) => s.accionEstadoPago)
   const [texto, setTexto] = useState('')
-  const [factura, setFactura] = useState('')
   const saldo = ep.neto - pagadoHasta(ep, Infinity)
   const [monto, setMonto] = useState(String(Math.round(saldo)))
   const [error, setError] = useState<string | null>(null)
@@ -326,14 +325,13 @@ function AccionModal({ ep, accion, onCerrar }: { ep: EstadoPago; accion: AccionE
     aprobar: 'Queda listo para facturar.',
     observar: 'El EP vuelve a la constructora para corregirlo y reingresarlo como una versión nueva.',
     devolver: 'Vuelve a borrador para corregirlo.',
-    facturar: 'El vencimiento se calcula con los días de pago del contrato.',
+    facturar: 'Se emite la factura electrónica (DTE) con el folio siguiente; el vencimiento se calcula con los días de pago del contrato.',
     anular: 'El avance incluido queda disponible para otro EP.',
   }
   return (
     <Modal abierto titulo={`${ACCIONES_EP[accion]} · ${nombreEP(ep)}`} onCerrar={onCerrar}>
       {ayuda[accion] && <p className="mb-3 text-sm text-slate-600">{ayuda[accion]}</p>}
       {conTexto && <Campo etiqueta={accion === 'anular' ? 'Motivo' : 'Observaciones'}><textarea rows={3} className={inputCls} value={texto} onChange={(e) => setTexto(e.target.value)} /></Campo>}
-      {accion === 'facturar' && <Campo etiqueta="N° de factura"><input className={inputCls} value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej.: F-1234" /></Campo>}
       {accion === 'pagar' && (
         <Campo etiqueta="Monto recibido ($)" ayuda={`Saldo por cobrar: ${mm(saldo)}. Un monto menor queda como pago parcial.`}>
           <input className={inputCls} inputMode="numeric" value={monto} onChange={(e) => setMonto(e.target.value)} />
@@ -343,7 +341,7 @@ function AccionModal({ ep, accion, onCerrar }: { ep: EstadoPago; accion: AccionE
       <div className="mt-4 flex justify-end gap-2">
         <Boton variante="secundario" onClick={onCerrar}>Cancelar</Boton>
         <Boton variante={accion === 'anular' ? 'peligro' : 'primario'} onClick={() => {
-          const err = ejecutar(ep.id, accion, { texto, factura, monto: accion === 'pagar' ? Number(monto.replace(/\./g, '').replace(',', '.')) : undefined })
+          const err = ejecutar(ep.id, accion, { texto, monto: accion === 'pagar' ? Number(monto.replace(/\./g, '').replace(',', '.')) : undefined })
           if (err) setError(err)
           else onCerrar()
         }}>{ACCIONES_EP[accion]}</Boton>
