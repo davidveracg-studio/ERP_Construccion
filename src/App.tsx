@@ -29,6 +29,7 @@ import Calidad from './pages/Calidad'
 import Seguridad from './pages/Seguridad'
 import Finanzas from './pages/Finanzas'
 import Comercial, { PropuestaDetalle } from './pages/Comercial'
+import Postventa from './pages/Postventa'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -125,6 +126,7 @@ function Rutas() {
               <Route path="seguridad" element={<Seguridad />} />
               <Route path="finanzas" element={<Finanzas />} />
               <Route path="comercial" element={<Comercial />} />
+              <Route path="postventa" element={<Postventa />} />
               <Route path="comercial/propuesta/:id" element={<PropuestaDetalle />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />

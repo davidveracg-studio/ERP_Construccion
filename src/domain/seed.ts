@@ -13,6 +13,7 @@ import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
 import { PLAZO_NCR } from './calidad'
 import { conIVA } from './finanzas'
+import { inicioGarantia, responsableDe } from './postventa'
 import { mejorFuente, puCostoLinea, rendimientosReales } from './comercial'
 import { RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from './seguridad'
 import { hhPorUnidad, puCosto } from './presupuesto'
@@ -24,6 +25,7 @@ import type {
   TipoTareaCritica, ObservacionPreventiva, Incidente,
   DocumentoTributario,
   Cliente, Lead, VisitaTecnica, Propuesta, LineaPropuesta, EstadoLead, EstadoPropuesta,
+  SolicitudPostventa, EstadoPostventa,
 } from './types'
 
 function rng(seed: number) {
@@ -987,6 +989,39 @@ function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rend
   return { cajasChicas: cajas, rendiciones }
 }
 
+/**
+ * Postventa de la demo (obra recibida): una filtración en la cubierta reparada por su subcontratista,
+ * pintura de oficinas reparada por la constructora, un daño por mal uso rechazado, un tablero eléctrico en
+ * reparación por Eléctrica Norte (lo ve en su portal) y una puerta recién reportada, por evaluar.
+ */
+function postventaDemo(d: Datos, hoyDia: Dia): SolicitudPostventa[] {
+  const H = hoyDia
+  const out: SolicitudPostventa[] = []
+  for (const o of d.obras) {
+    const ini = inicioGarantia(d, o.id, H - 1)
+    if (ini == null) continue
+    const partida = (re: RegExp) => d.partidas.find((p) => p.obraId === o.id && re.test(p.descripcion))?.id
+    const sol = (fecha: Dia, ubicacion: string, descripcion: string, categoria: SolicitudPostventa['categoria'], partidaId: string | undefined, pasos: [number, EstadoPostventa][], extra: Partial<SolicitudPostventa> = {}) => {
+      if (fecha <= ini || fecha > H - 1) return
+      out.push({
+        id: `pv_${o.id}_${out.length + 1}`, obraId: o.id, numero: out.filter((x) => x.obraId === o.id).length + 1, fecha, solicitante: `${o.mandante} (administración)`, ubicacion, descripcion, categoria,
+        ...(partidaId ? { partidaId } : {}), ...responsableDe(d, o.id, partidaId),
+        historial: pasos.filter(([dd]) => fecha + dd <= H - 1).map(([dd, estado]) => ({ fecha: fecha + dd, estado, por: o.administrador })), creado: fecha, creadoPor: o.administrador, ...extra,
+      })
+    }
+    sol(H - 60, 'Bodega 2', 'Filtración por la cubierta en la junta con el muro poniente', 'instalaciones', partida(/^Cubierta/), [[2, 'en_evaluacion'], [4, 'en_reparacion'], [8, 'resuelta']],
+      { visita: H - 58, diagnostico: 'Sello de la junta cubierta–muro desprendido en 6 m', costoReparacion: 680_000, cargoSubcontratista: true })
+    sol(H - 35, 'Oficinas', 'Pintura descascarada en el muro del baño de oficinas', 'terminaciones', undefined, [[1, 'en_evaluacion'], [3, 'en_reparacion'], [10, 'resuelta']],
+      { visita: H - 34, diagnostico: 'Humedad por falta de sello en la ducha; se selló y repintó', costoReparacion: 240_000 })
+    sol(H - 20, 'Andén de carga', 'Radier fisurado frente a la bodega 3', 'estructura', partida(/^Radier/), [[2, 'rechazada']],
+      { motivoRechazo: 'Daño por mal uso: impacto de grúa horquilla del usuario (no es falla constructiva)' })
+    sol(H - 12, 'Bodega 4', 'El tablero eléctrico de la bodega dispara el automático general', 'instalaciones', partida(/^Instalaciones eléctricas/), [[2, 'en_evaluacion'], [4, 'en_reparacion']],
+      { visita: H - 10, diagnostico: 'Diferencial defectuoso; Eléctrica Norte lo reemplaza dentro de la garantía' })
+    sol(H - 1, 'Bodega 1', 'La puerta de acceso peatonal no cierra bien', 'instalaciones', undefined, [])
+  }
+  return out
+}
+
 const USUARIO_R06 = 'Daniela Fuentes'
 
 /**
@@ -1925,7 +1960,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 18
+export const VERSION_DEMO = 19
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1944,7 +1979,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [], solicitudesPostventa: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -2003,6 +2038,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, seguridadDemo(d, hoyDia))
   // Comercial: clientes, leads, visitas y propuestas (las obras nacieron de propuestas adjudicadas)
   Object.assign(d, comercialDemo(d, hoyDia))
+  // Postventa de las obras recibidas (garantía del art. 18 LGUC)
+  d.solicitudesPostventa = postventaDemo(d, hoyDia)
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades
