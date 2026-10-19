@@ -3,7 +3,7 @@
 
 export type Dia = number
 
-export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R09' | 'R10' | 'R11'
+export type Rol = 'R01' | 'R02' | 'R03' | 'R04' | 'R05' | 'R07' | 'R08' | 'R09' | 'R10' | 'R11'
 
 export const ROLES: Record<Rol, string> = {
   R01: 'Gerencia',
@@ -12,6 +12,7 @@ export const ROLES: Record<Rol, string> = {
   R04: 'Capataz',
   R05: 'Oficina Técnica / Control',
   R07: 'Bodega y Adquisiciones',
+  R08: 'Prevención de Riesgos',
   R09: 'Finanzas',
   R10: 'Subcontratista',
   R11: 'Mandante / ITO',
@@ -53,6 +54,8 @@ export interface Partida {
   ordenCambioId?: string
   /** Desde cuándo se programa una partida sin actividad en la Carta Gantt (por defecto, el inicio de obra). */
   inicioProgramado?: Dia
+  /** Tarea crítica de seguridad (v1.3): exige ART del día para reportar avance (RULE-803). */
+  tareaCritica?: TipoTareaCritica
 }
 
 export type TipoOrdenCambio = 'aumento' | 'extraordinaria' | 'disminucion' | 'plazo'
@@ -744,6 +747,98 @@ export interface NoConformidad {
   creadoPor: string
 }
 
+// --- Seguridad y salud en el trabajo (v1.3: 08 dominio 15, 10 §18) ---
+export type TipoTareaCritica = 'altura' | 'excavacion' | 'izaje' | 'caliente' | 'confinado' | 'electrico'
+
+export interface CharlaSeguridad {
+  id: string
+  obraId: string
+  fecha: Dia
+  /** null: charla para toda la obra. */
+  cuadrillaId: string | null
+  tema: string
+  relator: string
+  asistentes: number
+  creadoPor: string
+}
+
+/** Análisis de Riesgo de la Tarea, firmado por la cuadrilla antes de una tarea crítica. */
+export interface ART {
+  id: string
+  obraId: string
+  fecha: Dia
+  cuadrillaId: string | null
+  partidaId: string | null
+  tarea: TipoTareaCritica
+  descripcion: string
+  riesgos: string[]
+  medidas: string[]
+  /** Trabajadores que firmaron. */
+  firmantes: number
+  responsable: string
+  creadoPor: string
+}
+
+export interface InspeccionSeguridad {
+  id: string
+  obraId: string
+  programada: Dia
+  inspector: string
+  realizada?: { fecha: Dia; cumplimiento: number; hallazgos: string }
+}
+
+export interface ObservacionPreventiva {
+  id: string
+  obraId: string
+  fecha: Dia
+  tipo: 'conducta' | 'condicion'
+  /** Conducta o condición segura (refuerzo positivo) o insegura (requiere corrección). */
+  segura: boolean
+  descripcion: string
+  responsable: string
+  plazo: Dia
+  cerrada?: Dia
+  creadoPor: string
+}
+
+export type TipoIncidente = 'cuasi' | 'sin_tiempo_perdido' | 'con_tiempo_perdido' | 'grave' | 'fatal' | 'danio_material' | 'enfermedad'
+export type EstadoIncidente = 'reportado' | 'clasificado' | 'en_investigacion' | 'medidas_en_curso' | 'cerrado'
+
+export interface Incidente {
+  id: string
+  obraId: string
+  numero: number
+  fecha: Dia
+  tipo: TipoIncidente
+  descripcion: string
+  lugar: string
+  /** Trabajador afectado (dato sensible: solo Prevención y Gerencia, RN-P08). */
+  afectado?: string
+  /** Empresa del afectado: la constructora o el subcontratista. */
+  empresa: string
+  diasPerdidos?: number
+  /** Potencial de un cuasi accidente (los de bajo potencial se cierran sin investigación). */
+  potencial?: 'bajo' | 'alto'
+  causas?: string
+  /** RULE-802: denuncia (DIAT) y protocolo legal de accidentes graves o fatales. */
+  protocolo?: { diat?: Dia; suspension?: Dia; avisoInspeccion?: Dia; avisoSeremi?: Dia; reanudacion?: Dia }
+  historial: PasoDoc<EstadoIncidente>[]
+  creado: Dia
+  creadoPor: string
+}
+
+export interface MedidaCorrectiva {
+  id: string
+  obraId: string
+  origen: { tipo: 'incidente' | 'inspeccion' | 'observacion'; id: string }
+  descripcion: string
+  responsable: string
+  plazo: Dia
+  cumplida?: { fecha: Dia; evidencia: string; por: string }
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */
@@ -1139,6 +1234,10 @@ export interface Config {
     limiteSubcontratoUf?: number
     /** RN-P04: el administrador de obra aprueba ítems de rendición hasta este monto en UF. */
     limiteRendicionUf?: number
+    /** RULE-801: el RDO no se envía sin la charla del día (si es false, solo alerta). */
+    charlaObligatoria?: boolean
+    /** KSE-01: meta de tasa de frecuencia (accidentes CTP por millón de HH). */
+    metaIF?: number
   }
   /** Valor de la UF en pesos para los umbrales expresados en UF. */
   valorUF?: number

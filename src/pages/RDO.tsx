@@ -1,7 +1,9 @@
 // Reporte Diario de Obra del capataz: avance en cantidades + HH por partida (17 §4.1, 20 §6.1)
 import { useEffect, useMemo, useState } from 'react'
 import { Badge, Boton, Card, Titulo, cx, inputCls } from '../components/ui'
+import { Link } from 'react-router'
 import { estadoNCR, liberacionesPendientes } from '../domain/calidad'
+import { artDelDia, charlaDelDia, partidasSinART, RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from '../domain/seguridad'
 import { hhDeRegistro } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, uid } from '../domain/formato'
@@ -121,6 +123,14 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
     const h = existente?.hh.find((x) => x.ncrId)
     return h ? { ncrId: h.ncrId!, trabajadores: h.trabajadores, horas: h.horasNormales } : null
   })
+  const registrarCharla = useStore((s) => s.registrarCharla)
+  const registrarART = useStore((s) => s.registrarART)
+  // RULE-801: charla del día de la cuadrilla; RULE-803: ART de las tareas críticas
+  const charla = charlaDelDia(d, ui.obraId, cuadrillaId, t)
+  const exigeCharla = d.config.umbrales.charlaObligatoria !== false
+  const [tema, setTema] = useState(TEMAS_CHARLA[t % TEMAS_CHARLA.length])
+  const [asistentes, setAsistentes] = useState(cq.trabajadores)
+  const [artAbierto, setArtAbierto] = useState<string | null>(null)
   const bloqueadas = new Map(partidasSemana.map((p) => [p.p.id, liberacionesPendientes(d, p.p.id, t)]).filter(([, l]) => (l as unknown[]).length) as [string, ReturnType<typeof liberacionesPendientes>][])
   const [obs, setObs] = useState(existente?.observaciones ?? '')
   const [msg, setMsg] = useState<string | null>(null)
@@ -156,6 +166,17 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
 
   return (
     <>
+          <div className="flex justify-end"><Link to="/seguridad?incidente=1" className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white">⚠ Reportar incidente</Link></div>
+          <Card titulo="0 · Charla de seguridad">
+            {charla ? <p className="text-sm text-emerald-800">✓ Charla realizada: {charla.tema} · {charla.asistentes} asistentes · {charla.relator}</p> : (
+              <div className="grid gap-2 sm:grid-cols-[2fr_1fr_auto]">
+                <select className={inputCls} value={tema} onChange={(e) => setTema(e.target.value)} aria-label="Tema de la charla">{TEMAS_CHARLA.map((x) => <option key={x}>{x}</option>)}</select>
+                <Stepper etiqueta="Asistentes" valor={asistentes} onChange={setAsistentes} max={cq.trabajadores} />
+                <Boton className="self-end" onClick={() => { const e = registrarCharla({ obraId: ui.obraId, fecha: t, cuadrillaId, tema, relator: ui.usuario, asistentes }); setErr(e) }}>Registrar charla</Boton>
+                <p className="text-xs text-slate-500 sm:col-span-3">{exigeCharla ? 'Sin la charla del día el reporte no se puede enviar (RULE-801).' : 'Si falta la charla, Prevención recibe una alerta (RULE-801).'}</p>
+              </div>
+            )}
+          </Card>
           <Card titulo="1 · Clima">
             <div className="grid grid-cols-4 gap-2">
               {CLIMAS.map(([k, i, n]) => (
@@ -175,6 +196,24 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
                 return (
                   <div key={p.p.id} className="rounded-xl border border-slate-200 p-3">
                     {p.ordenCambio != null && <p className="mb-1"><Badge tono="ambar">Orden de cambio N° {p.ordenCambio} sin aprobar por el mandante</Badge></p>}
+                    {p.p.tareaCritica && (artDelDia(d, ui.obraId, cuadrillaId, p.p, t)
+                      ? <p className="mb-1"><Badge tono="verde">ART firmado · {TAREAS_CRITICAS[p.p.tareaCritica]}</Badge></p>
+                      : <div className="mb-1">
+                          <Badge tono="ambar">Tarea crítica: requiere ART ({TAREAS_CRITICAS[p.p.tareaCritica]})</Badge>
+                          <button className="ml-2 text-xs text-marca underline" onClick={() => setArtAbierto(artAbierto === p.p.id ? null : p.p.id)}>Firmar ART</button>
+                          {artAbierto === p.p.id && (
+                            <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+                              <p><b>Riesgos:</b> {RIESGOS_TAREA[p.p.tareaCritica].riesgos.join(' · ')}</p>
+                              <p><b>Medidas:</b> {RIESGOS_TAREA[p.p.tareaCritica].medidas.join(' · ')}</p>
+                              <Boton className="mt-2 min-h-0 py-1" onClick={() => {
+                                const base = RIESGOS_TAREA[p.p.tareaCritica!]
+                                const e = registrarART({ obraId: ui.obraId, fecha: t, cuadrillaId, partidaId: p.p.id, tarea: p.p.tareaCritica!, descripcion: p.p.descripcion, riesgos: base.riesgos, medidas: base.medidas, firmantes: fila(p.p.id).trabajadores || cq.trabajadores, responsable: ui.usuario })
+                                setErr(e)
+                                if (!e) setArtAbierto(null)
+                              }}>Firmar con {fila(p.p.id).trabajadores || cq.trabajadores} trabajadores</Boton>
+                            </div>
+                          )}
+                        </div>)}
                     {bloqueadas.has(p.p.id) && <p className="mb-1"><Badge tono="rojo">Bloqueada: falta aprobar el protocolo N° {bloqueadas.get(p.p.id)![0].numero} ({bloqueadas.get(p.p.id)![0].nombre})</Badge></p>}
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="font-medium">{p.p.codigo} {p.p.descripcion}</span>
@@ -249,6 +288,9 @@ function Formulario({ c, cq, existente, partidasSemana, fecha }: {
             <Boton className="h-14 flex-[2] text-base" onClick={() => {
               const bloq = Object.entries(filas).find(([pid, f]) => bloqueadas.has(pid) && (Number(f.cantidad.replace(',', '.')) || 0) > 0)
               if (bloq) { setMsg(null); setErr(`No se puede reportar avance en una partida con protocolo de liberación sin aprobar (${bloqueadas.get(bloq[0])![0].nombre}).`); return }
+              if (exigeCharla && !charla) { setMsg(null); setErr('Registra la charla de seguridad del día antes de enviar el reporte (RULE-801).'); return }
+              const sinArt = partidasSinART(d, armar('enviado'))
+              if (sinArt.length) { setMsg(null); setErr(`Falta el ART del día para la tarea crítica: ${sinArt.map((x) => `${x.codigo} ${x.descripcion}`).join(', ')} (RULE-803).`); return }
               setErr(null)
               guardar(armar('enviado')); setMsg(navigator.onLine ? 'Reporte enviado. El jefe de terreno lo validará.' : 'Sin señal: guardado en el teléfono, se enviará al recuperar conexión.') }}>
               Enviar reporte

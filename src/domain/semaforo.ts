@@ -1,4 +1,4 @@
-// Semáforo ejecutivo de 8 dimensiones (14 §5.3). Activas: plazo, costos, avance, productividad, compras, calidad y caja.
+// Semáforo ejecutivo de 8 dimensiones (14 §5.3). Todas activas desde la v1.3.
 import type { CalcObra } from './evm'
 import type { Config, EstadoSemaforo } from './types'
 
@@ -20,7 +20,7 @@ export const DIMENSIONES: { dim: Dimension; nombre: string; kpi: string; disponi
   { dim: 'productividad', nombre: 'Productividad', kpi: 'HH/unidad' },
   { dim: 'compras', nombre: 'Compras', kpi: 'OTIF' },
   { dim: 'calidad', nombre: 'Calidad', kpi: 'NCR abiertas' },
-  { dim: 'seguridad', nombre: 'Seguridad', kpi: 'Accidentes', disponibleEn: 'v1.3' },
+  { dim: 'seguridad', nombre: 'Seguridad', kpi: 'Accidentes CTP' },
   { dim: 'caja', nombre: 'Caja', kpi: 'Mínimo 60 días' },
 ]
 
@@ -51,6 +51,8 @@ export function semaforo(c: CalcObra, cfg: Config): CeldaSemaforo[] {
       case 'compras': valor = c.compras.otif; estado = c.compras.estado; break
       // KCA-02: NCR abiertas (rojo si hay vencidas, ver calidad.ts)
       case 'calidad': valor = c.calidad.ncrAbiertas; estado = c.calidad.estado; break
+      // KSE-12 + preventivos: accidentes con tiempo perdido del mes (ver seguridad.ts)
+      case 'seguridad': valor = c.seguridad.ctp; estado = c.seguridad.estado; break
     }
     return { ...d, valor, estado }
   })
@@ -81,10 +83,17 @@ export function healthScore(c: CalcObra, cfg: Config): number | null {
     [norm(c.productividadDesv, 0, u.productividad[1], 0.3), 0.1],
     // Caja (14 §6: 10 %): mínimo a 60 días como fracción de la venta, contra el colchón
     [c.venta > 0 && c.caja.estado !== 'na' ? norm(c.caja.minimo60 / c.venta, u.cajaColchon ?? 0.02, 0, -0.05) : null, 0.1],
+    // Seguridad (14 §5.1: 15 %): IF, charlas, medidas vencidas y observaciones cerradas en plazo
+    [c.seguridad.estado !== 'na' ? avg([
+      [norm(c.seguridad.if, u.metaIF ?? 20, (u.metaIF ?? 20) * 1.5, (u.metaIF ?? 20) * 2), 0.3], [norm(c.seguridad.charlas, 1, 0.95, 0.85), 0.25],
+      [norm(c.seguridad.medidasVencidas, 0, 1, 5), 0.25], [norm(c.seguridad.obsEnPlazo, 0.9, 0.8, 0.6), 0.2],
+    ]) : null, 0.15],
     // Calidad (14 §5.1: 5 %): rework rate (KCA-07) y NCR abiertas (KCA-02)
     [c.calidad.estado !== 'na' ? avg([[norm(c.calidad.reworkRate, 0.02, 0.03, 0.06), 0.5], [norm(c.calidad.ncrAbiertas, 3, 5, 10), 0.5]]) : null, 0.05],
   ]
-  return avg(comps)
+  const score = avg(comps)
+  // Regla de tope: un accidente grave o fatal en el mes limita el score a 59 ("Riesgo")
+  return score != null && c.seguridad.graveMes ? Math.min(score, 59) : score
 }
 
 function avg(xs: [number | null, number][]): number | null {

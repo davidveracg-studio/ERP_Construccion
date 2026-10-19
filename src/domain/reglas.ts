@@ -5,6 +5,7 @@ import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIP
 import { epAtrasado } from './estadosPago'
 import { estadoRendicion, observacionesRendicion, totalRendicion } from './cajaChica'
 import { estadoNCR, estadoProtocolo, ncrVencida, protocoloAprobado } from './calidad'
+import { charlaDelDia, estadoIncidente, medidaVencida, partidasSinART, pasosPendientes, TAREAS_CRITICAS, TIPOS_INCIDENTE } from './seguridad'
 import { CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, IMPRODUCTIVAS_MAX, indicadoresEquipo, MODALIDAD, UTILIZACION_MIN } from './maquinaria'
 import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
 import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
@@ -54,6 +55,10 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-401': 'Rendición con diferencias o sin respaldo',
   'RULE-104': 'Protocolo de calidad rechazado',
+  'RULE-801': 'RDO sin charla de seguridad',
+  'RULE-802': 'Accidente con tiempo perdido, grave o fatal',
+  'RULE-803': 'Tarea crítica sin ART',
+  'RULE-804': 'Medida correctiva vencida',
   'RULE-111': 'Rework rate sobre umbral',
   'RULE-112': 'NCR vencida',
   'RULE-305': 'OTIF de proveedor bajo',
@@ -505,6 +510,51 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         accionRequerida: 'Coordinar frentes de trabajo, operador y combustible para que el equipo no espere.',
         responsable: o.jefeTerreno, kpi: 'KMQ-02', valorKpi: k.improductividad ?? undefined,
       })
+  }
+
+  // Seguridad (v1.3): RULE-801 RDO de la semana sin charla del día
+  const rdosSemana = d.rdos.filter((r) => r.obraId === o.id && r.fecha <= c.corte && r.fecha > c.corte - 7 && (r.estado === 'enviado' || r.estado === 'validado'))
+  const sinCharla = rdosSemana.filter((r) => !charlaDelDia(d, o.id, r.cuadrillaId, r.fecha))
+  if (sinCharla.length)
+    out.push({
+      regla: 'RULE-801', clave: 'RULE-801', severidad: 'alta', titulo: `${sinCharla.length} reporte(s) diario(s) sin charla de seguridad`, entidad: o.nombre,
+      datos: sinCharla.slice(0, 4).map((r) => ({ etiqueta: fmtFecha(r.fecha), valor: d.cuadrillas.find((q) => q.id === r.cuadrillaId)?.nombre ?? '' })),
+      porQue: 'La charla diaria es la primera barrera preventiva y es obligatoria antes de iniciar la jornada.',
+      accionRequerida: 'Registrar la charla de cada cuadrilla antes de enviar el reporte del día.',
+      responsable: o.jefeTerreno, kpi: 'KSE-05', valorKpi: c.seguridad.charlas ?? undefined,
+    })
+  // RULE-803: avance o HH en una tarea crítica sin ART del día
+  const sinART = rdosSemana.flatMap((r) => partidasSinART(d, r).map((p) => ({ r, p })))
+  if (sinART.length)
+    out.push({
+      regla: 'RULE-803', clave: 'RULE-803', severidad: 'critica', titulo: `${sinART.length} tarea(s) crítica(s) ejecutada(s) sin ART`, entidad: o.nombre,
+      datos: sinART.slice(0, 4).map(({ r, p }) => ({ etiqueta: `${fmtFecha(r.fecha)} · ${p.codigo} ${p.descripcion}`, valor: TAREAS_CRITICAS[p.tareaCritica!] })),
+      porQue: 'Una tarea crítica (altura, excavación, izaje, caliente, confinado, eléctrico) no puede iniciarse sin el análisis de riesgo firmado por la cuadrilla.',
+      accionRequerida: 'Detener la tarea hasta registrar el ART y revisar con Prevención por qué se inició sin él.',
+      responsable: o.jefeTerreno, kpi: 'KSE-06', valorKpi: c.seguridad.art ?? undefined,
+    })
+  // RULE-802: accidente con tiempo perdido, grave o fatal con pasos del protocolo legal pendientes
+  for (const i of d.incidentes.filter((x) => x.obraId === o.id && x.creado <= c.corte && estadoIncidente(x, c.corte) !== 'cerrado')) {
+    const pend = pasosPendientes(i)
+    if (!pend.length) continue
+    out.push({
+      regla: 'RULE-802', clave: `RULE-802|${i.id}`, severidad: 'critica', titulo: `${TIPOS_INCIDENTE[i.tipo]} N° ${i.numero}`, entidad: `${i.lugar} · ${i.empresa}`,
+      datos: [{ etiqueta: 'Fecha', valor: fmtFecha(i.fecha) }, ...(i.diasPerdidos ? [{ etiqueta: 'Días perdidos', valor: String(i.diasPerdidos) }] : []), { etiqueta: 'Pendiente', valor: pend.join(' · ') }],
+      porQue: 'La Ley 16.744 exige denunciar el accidente y, si es grave o fatal, suspender la faena y avisar de inmediato a la Inspección del Trabajo y a la SEREMI de Salud.',
+      accionRequerida: 'Completar el protocolo legal y registrar cada paso con su fecha.',
+      responsable: o.administrador,
+    })
+  }
+  // RULE-804: medida correctiva vencida (a los 7 días escala al administrador)
+  for (const m of d.medidasCorrectivas.filter((x) => x.obraId === o.id && medidaVencida(x, c.corte))) {
+    const atraso = c.corte - m.plazo
+    out.push({
+      regla: 'RULE-804', clave: `RULE-804|${m.id}`, severidad: 'media', titulo: 'Medida correctiva vencida', entidad: m.descripcion,
+      datos: [{ etiqueta: 'Plazo', valor: `${fmtFecha(m.plazo)} (${atraso} días de atraso)` }, { etiqueta: 'Responsable', valor: m.responsable }],
+      porQue: 'La medida que debía controlar el riesgo sigue sin cumplirse.',
+      accionRequerida: atraso >= 7 ? 'Escalado al administrador: exigir el cumplimiento o reprogramar con causa.' : 'Cumplir la medida y registrar la evidencia.',
+      responsable: atraso >= 7 ? o.administrador : m.responsable,
+    })
   }
 
   // Calidad (v1.3): RULE-104 protocolo rechazado cuya reinspección aún no se aprueba
