@@ -1126,6 +1126,11 @@ export interface EnlaceModelo {
   actividadId: string
   capa: Capa
   pisos: number[]
+  /**
+   * Elementos del IFC (expressID) asignados a la actividad (detalle por tarea o sector): avanzan solo
+   * con ella. El resto de los elementos de su capa y pisos sigue la regla general.
+   */
+  elementos?: number[]
 }
 
 /** Nivel (IfcBuildingStorey) de un modelo BIM y el piso del modelo 4D al que corresponde (0 = terreno). */

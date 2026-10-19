@@ -63,7 +63,7 @@ No se piden correo ni contraseña: se elige un rol y se presiona **Ingresar**. L
 | Flujo de caja | `/caja` — caja disponible (capital de trabajo + cobros − pagos) real y proyectada por obra y cartera, mínimo a 60 días en el semáforo (KFI-06), estados de pago al mandante (generar desde el avance validado → aprobar → facturar → pagar, con retención y anticipo), alertas RULE-603 y RULE-402 | 07, 12, 13, 14 §4.3 |
 | Control de costos | `/costos` — Presupuesto → Comprometido → Ejecutado → Proyectado, forecast manual auditado (RN-P11), sin imputar, compromisos | RF-COS |
 | Carta Gantt | `/programa` — línea base vs proyectado, ruta crítica (CPM con FC/CC/FF/CF, desfases y hitos contractuales como fecha límite), re-baseline con aprobación de R01 | 10 §23, RF-PLA |
-| Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) o **BIM (IFC)** enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación. Los elementos IFC se asignan solos a capa (por clase) y piso (por nivel); modelo de ejemplo en `public/demo` | — |
+| Simulación 4D | `/4d` — modelo 3D paramétrico (pisos y planta) o **BIM (IFC)** enlazado a la Carta Gantt; línea de tiempo con reproducción, plan (línea base) vs real (RDO validados) y proyección CPM después de hoy, colores por desviación. Los elementos IFC se asignan solos a capa (por clase) y piso (por nivel) y se pueden **asignar a una tarea o sector** (clic en el modelo o filtro por nombre, capa y piso); **ficha del elemento** al tocarlo (actividades, partidas, protocolos, NCR, RFI, incidentes y postventa del lugar); **vista por piso** (todos, hasta un piso o solo uno); modelo de ejemplo en `public/demo` | — |
 | RDO del capataz | `/rdo` — móvil, avance en cantidades + HH por partida + HH no productivas | 17 §4.1, 20 §6.1 |
 | Validación y rendimientos | `/terreno` — el jefe de terreno valida/devuelve; HH/unidad real vs APU por cuadrilla | 10 §5 |
 | Cierre semanal | `/cierre` — checklist de completitud, snapshot inmutable, evaluación de reglas | 17 §4.2 |
@@ -92,6 +92,7 @@ src/domain/     Motor puro en TypeScript (sin React): lo que en producción corr
   seguridad.ts    Charlas, ART, incidentes, protocolo legal, medidas e indicadores KSE (RULE-801..804)
   finanzas.ts     DTE, cuentas por cobrar y por pagar, pagos programados (KFI-03/05/09/11/12/13)
   comercial.ts    Leads, propuestas, precio, catálogo de rendimientos reales e indicadores KCM
+  bimContexto.ts  Ficha del elemento del modelo 4D: actividades, partidas y registros del lugar
   postventa.ts    Garantía art. 18 LGUC, solicitudes, asignación al subcontratista y KCA-06 (RULE-503)
   benchmark.ts    Segmento, percentiles BEN, Score Empresa, riesgo empresarial, scores e índices OBR
   auditoria.ts    Informe ejecutivo mensual con recomendaciones automáticas (14 §14)

@@ -3,7 +3,7 @@
 // los mismos enlaces actividad → capa y pisos del modelo paramétrico, y el avance de cada
 // capa/piso se reparte entre sus elementos de abajo hacia arriba.
 import { CAPAS_TERRENO } from './modelo4d'
-import type { Capa, NivelIfc } from './types'
+import type { Capa, EnlaceModelo, NivelIfc } from './types'
 
 /** Modelo BIM de ejemplo servido con la app (public/demo, generado por scripts/ifc-demo.mjs). */
 export const RUTA_IFC_DEMO = 'demo:edificio-los-aromos.ifc'
@@ -53,6 +53,8 @@ export interface AgrupacionIfc {
   claveDe: Map<number, string>
   /** Elementos con geometría cuya clase no corresponde a ninguna capa. */
   sinCapa: number
+  /** Clave capa|piso de origen, antes de asignar elementos a actividades. */
+  original?: Map<number, string>
 }
 
 /**
@@ -108,4 +110,45 @@ export function agruparIfc(niveles: NivelLeido[], elementos: ElementoLeido[]): A
 /** Cuántos elementos de un grupo se muestran construidos para un avance f (0–1). */
 export function elementosConstruidos(total: number, f: number): number {
   return Math.min(total, Math.max(0, Math.round(f * total + 1e-9)))
+}
+
+/** Clave del grupo de elementos asignados directamente a una actividad. */
+export const claveActividad = (actividadId: string) => `act|${actividadId}`
+
+/**
+ * Detalle por tarea: los elementos asignados a una actividad salen de su grupo capa|piso y forman
+ * el grupo de esa actividad, en el mismo orden constructivo. El resto sigue la regla de capa y piso.
+ */
+export function reagruparPorActividad(agr: AgrupacionIfc, enlaces: EnlaceModelo[]): AgrupacionIfc {
+  const asignado = new Map<number, string>()
+  for (const e of enlaces) for (const id of e.elementos ?? []) if (agr.claveDe.has(id) && !asignado.has(id)) asignado.set(id, claveActividad(e.actividadId))
+  if (!asignado.size) return agr
+  const grupos = new Map<string, number[]>()
+  const claveDe = new Map(agr.claveDe)
+  for (const [clave, ids] of agr.grupos) {
+    const quedan = ids.filter((id) => !asignado.has(id))
+    if (quedan.length) grupos.set(clave, quedan)
+    for (const id of ids) {
+      const k = asignado.get(id)
+      if (!k) continue
+      grupos.set(k, [...(grupos.get(k) ?? []), id])
+      claveDe.set(id, k)
+    }
+  }
+  return { ...agr, grupos, claveDe, original: agr.claveDe }
+}
+
+/** Capa y piso de origen (regla automática) de un elemento IFC. */
+export function origenElemento(agr: AgrupacionIfc, id: number): { capa: Capa; piso: number } | null {
+  const k = (agr.original ?? agr.claveDe).get(id)
+  if (!k) return null
+  const [capa, piso] = k.split('|')
+  return { capa: capa as Capa, piso: Number(piso) }
+}
+
+/** Piso más frecuente de un conjunto de elementos (para etiquetar el grupo de una actividad). */
+export function pisoDominante(agr: AgrupacionIfc, ids: number[]): number {
+  const n = new Map<number, number>()
+  for (const id of ids) { const o = origenElemento(agr, id); if (o) n.set(o.piso, (n.get(o.piso) ?? 0) + 1) }
+  return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 1
 }
