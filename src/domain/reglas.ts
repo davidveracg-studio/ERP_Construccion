@@ -5,6 +5,7 @@ import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIP
 import { epAtrasado } from './estadosPago'
 import { estadoRendicion, observacionesRendicion, totalRendicion } from './cajaChica'
 import { estadoNCR, estadoProtocolo, ncrVencida, protocoloAprobado } from './calidad'
+import { CATEGORIAS_POSTVENTA, DIAS_SOLUCION, estadoPostventa, vencidaPostventa } from './postventa'
 import { charlaDelDia, estadoIncidente, medidaVencida, partidasSinART, pasosPendientes, TAREAS_CRITICAS, TIPOS_INCIDENTE } from './seguridad'
 import { CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, IMPRODUCTIVAS_MAX, indicadoresEquipo, MODALIDAD, UTILIZACION_MIN } from './maquinaria'
 import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
@@ -55,6 +56,7 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-401': 'Rendición con diferencias o sin respaldo',
   'RULE-104': 'Protocolo de calidad rechazado',
+  'RULE-503': 'Solicitud de postventa fuera de plazo',
   'RULE-801': 'RDO sin charla de seguridad',
   'RULE-802': 'Accidente con tiempo perdido, grave o fatal',
   'RULE-803': 'Tarea crítica sin ART',
@@ -511,6 +513,18 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         accionRequerida: 'Coordinar frentes de trabajo, operador y combustible para que el equipo no espere.',
         responsable: o.jefeTerreno, kpi: 'KMQ-02', valorKpi: k.improductividad ?? undefined,
       })
+  }
+
+  // Postventa (v2): RULE-503 solicitud sin evaluar a los 3 días o sin resolver a los 30
+  for (const s of d.solicitudesPostventa.filter((x) => x.obraId === o.id && vencidaPostventa(x, c.corte))) {
+    const dias = c.corte - s.fecha
+    out.push({
+      regla: 'RULE-503', clave: `RULE-503|${s.id}`, severidad: dias > DIAS_SOLUCION + 15 ? 'alta' : 'media', titulo: `Postventa N° ${s.numero} fuera de plazo (${dias} días)`, entidad: `${s.ubicacion} · ${s.descripcion}`,
+      datos: [{ etiqueta: 'Estado', valor: estadoPostventa(s, c.corte) ?? '' }, { etiqueta: 'Categoría', valor: `${CATEGORIAS_POSTVENTA[s.categoria].nombre} (${CATEGORIAS_POSTVENTA[s.categoria].anos} años)` }, { etiqueta: 'Responsable', valor: s.responsable }],
+      porQue: 'El mandante espera respuesta dentro del plazo de servicio de la garantía.',
+      accionRequerida: estadoPostventa(s, c.corte) === 'recibida' ? 'Visitar y diagnosticar la falla.' : 'Exigir la reparación al responsable y registrar el cierre.',
+      responsable: o.administrador,
+    })
   }
 
   // Seguridad (v1.3): RULE-801 RDO de la semana sin charla del día

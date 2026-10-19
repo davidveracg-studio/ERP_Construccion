@@ -33,6 +33,7 @@ const NAV: Item[] = [
   { to: '/obra', etiqueta: 'Control Tower obra', roles: ['R01', 'R02', 'R05'], icono: '◉' },
   { to: '/alertas', etiqueta: 'Alertas y acciones', roles: ['R01', 'R02', 'R03', 'R05', 'R08'], icono: '⚑' },
   { to: '/costos', etiqueta: 'Control de costos', roles: ['R01', 'R02', 'R05'], icono: '$' },
+  { to: '/postventa', etiqueta: 'Postventa', roles: ['R01', 'R02', 'R05'], icono: '⌂' },
   { to: '/comercial', etiqueta: 'Comercial', roles: ['R01', 'R06'], icono: '◎' },
   { to: '/finanzas', etiqueta: 'Finanzas', roles: ['R01', 'R09'], icono: '₿' },
   { to: '/caja', etiqueta: 'Flujo de caja', roles: ['R01', 'R02', 'R05', 'R09'], icono: '≋' },

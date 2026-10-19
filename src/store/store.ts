@@ -43,6 +43,7 @@ import {
 import {
   accionesPropuesta, clienteObservado, estadoLead, estadoPropuesta, margenBajo, puCostoLinea, puedeComercial, puedeVisita, totalesPropuesta, type AccionPropuesta,
 } from '../domain/comercial'
+import { accionesPostventa, inicioGarantia, puedeIngresarPostventa, responsableDe, type AccionPostventa } from '../domain/postventa'
 import { codigoDTE, conIVA, estadoDTE, puedeAnularConNC, puedeFacturar, puedeTesoreria, siguienteFolio } from '../domain/finanzas'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
@@ -51,7 +52,7 @@ import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
   EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion, ProtocoloCalidad, NoConformidad, InspeccionCalidad,
   CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, TipoTareaCritica, DocumentoTributario,
-  Cliente, Lead, VisitaTecnica, Propuesta, EstadoLead,
+  Cliente, Lead, VisitaTecnica, Propuesta, EstadoLead, SolicitudPostventa,
 } from '../domain/types'
 
 export interface UI {
@@ -238,6 +239,9 @@ export interface Acciones {
   editarPropuesta: (id: string, cambios: Partial<Pick<Propuesta, 'lineas' | 'gg' | 'margen' | 'plazoDias' | 'validezHasta' | 'exclusiones'>>) => string | null
   /** Adjudicar crea la obra en planificación con el itemizado como presupuesto. */
   accionPropuesta: (id: string, accion: AccionPropuesta, x?: { texto?: string; motivo?: Propuesta['motivoRechazo']; fechaInicio?: Dia }) => string | null
+  /** RULE-503: la solicitud se asigna al subcontratista de la partida (o a la constructora). */
+  ingresarPostventa: (s: Pick<SolicitudPostventa, 'obraId' | 'solicitante' | 'ubicacion' | 'descripcion' | 'categoria' | 'partidaId'>) => string | null
+  accionPostventa: (id: string, accion: AccionPostventa, x?: { diagnostico?: string; categoria?: SolicitudPostventa['categoria']; motivo?: string; costo?: number; cargoSubcontratista?: boolean }) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -1507,6 +1511,42 @@ export const useStore = create<Estado>()(
           })
           return null
         },
+        ingresarPostventa: (s) => {
+          const st = getS()
+          if (!puedeIngresarPostventa(st.ui.rol)) return 'La solicitud la ingresa el mandante o la constructora.'
+          if (!s.descripcion.trim() || !s.ubicacion.trim()) return 'Indica qué falla y dónde.'
+          const t = hoy()
+          if (inicioGarantia(st, s.obraId, t) == null) return 'La obra aún no tiene recepción: la garantía postventa corre desde la recepción.'
+          const numero = Math.max(0, ...st.solicitudesPostventa.filter((x) => x.obraId === s.obraId).map((x) => x.numero)) + 1
+          const asignado = responsableDe(st, s.obraId, s.partidaId)
+          mutar((x) => ({
+            solicitudesPostventa: [...x.solicitudesPostventa, {
+              ...s, ...asignado, id: uid('pv'), numero, fecha: t, descripcion: s.descripcion.trim(), ubicacion: s.ubicacion.trim(), solicitante: s.solicitante.trim() || st.ui.usuario,
+              historial: [], creado: t, creadoPor: st.ui.usuario,
+            }],
+          }))
+          return null
+        },
+        accionPostventa: (id, accion, x = {}) => {
+          const st = getS()
+          const s = st.solicitudesPostventa.find((y) => y.id === id)
+          if (!s) return 'La solicitud no existe.'
+          const t = hoy()
+          const esSuya = s.subcontratistaId != null && subcontratistaDeR10(st.proveedores)?.id === s.subcontratistaId
+          if (!accionesPostventa(s, t, st.ui.rol, esSuya).includes(accion)) return 'Tu rol no puede hacer esa acción en este estado.'
+          if (accion === 'evaluar' && !x.diagnostico?.trim()) return 'Registra el diagnóstico de la visita.'
+          if (accion === 'rechazar' && !x.motivo?.trim()) return 'Indica el motivo (fuera de garantía, mal uso…).'
+          const estado = { evaluar: 'en_evaluacion', reparar: 'en_reparacion', resolver: 'resuelta', rechazar: 'rechazada' }[accion] as SolicitudPostventa['historial'][number]['estado']
+          mutar((z) => ({
+            solicitudesPostventa: z.solicitudesPostventa.map((y) => (y.id !== id ? y : {
+              ...y, historial: [...y.historial, { fecha: t, estado, por: st.ui.usuario }],
+              ...(accion === 'evaluar' ? { visita: t, diagnostico: x.diagnostico!.trim(), ...(x.categoria ? { categoria: x.categoria } : {}) } : {}),
+              ...(accion === 'rechazar' ? { motivoRechazo: x.motivo!.trim() } : {}),
+              ...(accion === 'resolver' ? { costoReparacion: x.costo ?? 0, cargoSubcontratista: !!x.cargoSubcontratista || st.ui.rol === 'R10' } : {}),
+            })),
+          }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1514,7 +1554,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 21,
+      version: 22,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

@@ -962,6 +962,39 @@ export interface Propuesta {
   creadoPor: string
 }
 
+// --- Postventa (v2: 12 RULE-503, 14 KCA-06; garantía del art. 18 LGUC) ---
+/** Art. 18 LGUC: estructura 10 años, instalaciones y elementos constructivos 5 años, terminaciones 3 años. */
+export type CategoriaPostventa = 'estructura' | 'instalaciones' | 'terminaciones'
+export type EstadoPostventa = 'recibida' | 'en_evaluacion' | 'en_reparacion' | 'resuelta' | 'rechazada'
+
+export interface SolicitudPostventa {
+  id: string
+  obraId: string
+  numero: number
+  /** Fecha en que el mandante o propietario la ingresó. */
+  fecha: Dia
+  solicitante: string
+  /** Unidad o sector afectado (ej.: "Bodega 3", "Depto. 402"). */
+  ubicacion: string
+  descripcion: string
+  categoria: CategoriaPostventa
+  partidaId?: string
+  /** Quien repara: la constructora o el subcontratista de la partida (RULE-503). */
+  responsable: string
+  /** Subcontratista notificado (si la partida es subcontratada). */
+  subcontratistaId?: string
+  visita?: Dia
+  diagnostico?: string
+  /** Rechazo: fuera de garantía o daño por mal uso. */
+  motivoRechazo?: string
+  costoReparacion?: number
+  /** El costo lo asume el subcontratista. */
+  cargoSubcontratista?: boolean
+  historial: PasoDoc<EstadoPostventa>[]
+  creado: Dia
+  creadoPor: string
+}
+
 /** Condiciones de pago del contrato con el mandante y plazo de pago a proveedores. */
 export interface CondicionesPago {
   /** Anticipo como fracción de la venta; se amortiza en cada EP con el mismo porcentaje. */

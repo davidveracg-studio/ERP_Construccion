@@ -18,6 +18,7 @@ import {
 import type { DocumentoLaboral, EPSubcontrato, Subcontrato, TipoDocLaboral } from '../domain/types'
 import { useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { DetallePostventa, TablaPostventa } from './Postventa'
 
 const q = (n: number) => num(n, Math.abs(n % 1) > 0.0001 ? 2 : 0)
 
@@ -278,6 +279,22 @@ export default function PortalSubcontratista() {
         </>
       )}
       {f301Vigente(d.documentosLaborales, actual?.obraId ?? '', yo.id, t, t) ? null : <p className="text-xs text-slate-500">Carga el F30-1 de cada mes en la documentación laboral para no bloquear tus pagos.</p>}
+      <PostventaAsignada subcontratistaId={yo.id} />
     </div>
+  )
+}
+
+/** RULE-503: solicitudes de postventa de las partidas del subcontratista (las repara y las da por resueltas). */
+function PostventaAsignada({ subcontratistaId }: { subcontratistaId: string }) {
+  const d = useDatosDominio()
+  const [ver, setVer] = useState<string | null>(null)
+  const t = hoy()
+  const ss = d.solicitudesPostventa.filter((s) => s.subcontratistaId === subcontratistaId && s.creado <= t).sort((a, b) => b.fecha - a.fecha)
+  if (!ss.length) return null
+  return (
+    <Card titulo="Postventa asignada (garantía)">
+      <TablaPostventa ss={ss} onVer={setVer} conObra />
+      {ver && <DetallePostventa s={ss.find((s) => s.id === ver)!} onCerrar={() => setVer(null)} />}
+    </Card>
   )
 }

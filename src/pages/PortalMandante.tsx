@@ -1,11 +1,13 @@
 // Portal Mandante / ITO (R11, v1.1 — 07 Portal Mandante, 19 §5): avance de la obra (curva S en %),
 // estados de pago por aprobar con su respaldo e historial de cobros. Nunca muestra costos,
 // márgenes, alertas internas ni observaciones de la revisión interna.
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { CurvaS } from '../components/graficos'
 import { Boton, Card, Kpi, Titulo, Vacio } from '../components/ui'
 import { estadoProtocolo } from '../domain/calidad'
+import { inicioGarantia } from '../domain/postventa'
+import { DetallePostventa, NuevaSolicitud, TablaPostventa } from './Postventa'
 import { useStore } from '../store/store'
 import { etapaEP, indicadoresEP, pagadoHasta, presentadoEn, vigente } from '../domain/estadosPago'
 import { serieCurvaS } from '../domain/evm'
@@ -23,6 +25,8 @@ export default function PortalMandante() {
   const { d, c } = useCalc()
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
   const visar = useStore((s) => s.accionProtocolo)
+  const [pv, setPv] = useState<string | null>(null)
+  const [nuevaPv, setNuevaPv] = useState(false)
   if (!c) return null
   const t = hoy()
   const eps = d.estadosPago.filter((e) => e.obraId === c.obra.id && vigente(e, t)).sort((a, b) => b.numero - a.numero)
@@ -105,6 +109,14 @@ export default function PortalMandante() {
           </p>
         </Card>
       </div>
+
+      {inicioGarantia(d, c.obra.id, t) != null && (
+        <Card titulo="Postventa (garantía art. 18 LGUC)" accion={<Boton variante="secundario" onClick={() => setNuevaPv(true)}>Ingresar solicitud</Boton>}>
+          {(() => { const ss = d.solicitudesPostventa.filter((s) => s.obraId === c.obra.id && s.creado <= t).sort((a, b) => b.fecha - a.fecha); return ss.length ? <TablaPostventa ss={ss} onVer={setPv} /> : <p className="text-sm text-slate-500">Sin solicitudes.</p> })()}
+          {pv && <DetallePostventa s={d.solicitudesPostventa.find((s) => s.id === pv)!} onCerrar={() => setPv(null)} />}
+          {nuevaPv && <NuevaSolicitud obraId={c.obra.id} onCerrar={() => setNuevaPv(false)} />}
+        </Card>
+      )}
 
       {recepciones.length > 0 && (
         <Card titulo="Recepción de la obra">
