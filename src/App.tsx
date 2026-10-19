@@ -31,6 +31,7 @@ import Finanzas from './pages/Finanzas'
 import Comercial, { PropuestaDetalle } from './pages/Comercial'
 import Postventa from './pages/Postventa'
 import Benchmark from './pages/Benchmark'
+import Predictivo from './pages/Predictivo'
 import Auditorias, { AuditoriaDetalle } from './pages/Auditoria'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
@@ -130,6 +131,7 @@ function Rutas() {
               <Route path="comercial" element={<Comercial />} />
               <Route path="postventa" element={<Postventa />} />
               <Route path="benchmark" element={<Benchmark />} />
+              <Route path="predictivo" element={<Predictivo />} />
               <Route path="auditoria" element={<Auditorias />} />
               <Route path="auditoria/:id" element={<AuditoriaDetalle />} />
               <Route path="comercial/propuesta/:id" element={<PropuestaDetalle />} />
