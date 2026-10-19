@@ -3,7 +3,7 @@
 // mismo motor que usa la aplicación.
 import { RUTA_IFC_DEMO } from './bim'
 import { programarActividades } from './cpm'
-import { CONFIG_DEFECTO, type Datos } from './datos'
+import { CONFIG_DEFECTO, programaDe, type Datos } from './datos'
 import { anticipoPorAmortizar, DIAS_PREPARACION_EP, lineasEP, montosEP } from './estadosPago'
 import { diaSemana, finDeMes, iso } from './fechas'
 import { conIdsDeterministas } from './formato'
@@ -11,11 +11,13 @@ import { inferirModelo } from './modelo4d'
 import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
 import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
+import { PLAZO_NCR } from './calidad'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
   Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ItemRendicion,
+  ProtocoloCalidad, NoConformidad, InspeccionCalidad, PasoDoc, EstadoProtocolo,
 } from './types'
 
 function rng(seed: number) {
@@ -979,6 +981,175 @@ function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rend
   return { cajasChicas: cajas, rendiciones }
 }
 
+/** Protocolos de la demo según la partida: checklist, frecuencia (días) y la observación típica de un rechazo. */
+const PROTOCOLOS_DEMO: {
+  re: RegExp; nombre: string; tipo: ProtocoloCalidad['tipo']; obligatorio: boolean; ito: boolean; cada: number; checklist: string[]
+  obs: string; causa: string; accion: string; materiales: number
+}[] = [
+  {
+    re: /^Hormigón|^Radier/, nombre: 'Liberación antes de hormigonar', tipo: 'liberacion', obligatorio: true, ito: true, cada: 10,
+    checklist: ['Enfierradura según plano, traslapos y recubrimientos', 'Moldaje aplomado, estanco y con desmoldante', 'Pasadas e insertos de instalaciones', 'Ejes y niveles verificados'],
+    obs: 'Recubrimiento insuficiente en vigas del eje B: faltan separadores', causa: 'Separadores no instalados antes del cierre del moldaje', accion: 'Instalar separadores de 2,5 cm y reinspeccionar antes del vaciado', materiales: 85_000,
+  },
+  {
+    re: /Excavación|Relleno/, nombre: 'Control de sello y compactación', tipo: 'control', obligatorio: true, ito: true, cada: 14,
+    checklist: ['Sello o capa a cota de proyecto', 'Densidad ≥ 95 % del Proctor modificado (laboratorio)', 'Sin agua ni material suelto'],
+    obs: 'Densidad de 92 % en la capa 3, bajo el mínimo', causa: 'Capa de 30 cm, sobre el espesor especificado', accion: 'Escarificar y recompactar en capas de 20 cm con nuevo ensayo', materiales: 160_000,
+  },
+  {
+    re: /^Estructura metálica/, nombre: 'Control de montaje y soldaduras', tipo: 'control', obligatorio: true, ito: true, cada: 14,
+    checklist: ['Aplome y alineación de columnas', 'Pernos de anclaje con torque especificado', 'Soldaduras sin poros (inspección visual)', 'Pintura anticorrosiva en uniones'],
+    obs: 'Soldadura con poros en la unión de la cercha 4', causa: 'Electrodos húmedos', accion: 'Esmerilar y resoldar la unión con electrodos secos', materiales: 120_000,
+  },
+  {
+    re: /Albañilería|Tabiquería/, nombre: 'Control de plomo, nivel y fijaciones', tipo: 'control', obligatorio: false, ito: false, cada: 10,
+    checklist: ['Plomo y nivel dentro de ±3 mm/m', 'Trabas y fijaciones según detalle', 'Juntas uniformes y llenas'],
+    obs: 'Paño fuera de plomo (6 mm/m) en el eje 3', causa: 'Escantillón mal aplomado al inicio del paño', accion: 'Demoler y rehacer el paño con escantillón verificado', materiales: 140_000,
+  },
+  {
+    re: /Estucos|Cerámicos|Pavimento|Cielos|Pintura|Cubierta/, nombre: 'Control de terminaciones', tipo: 'control', obligatorio: false, ito: false, cada: 14,
+    checklist: ['Planeidad con regla de 2 m (≤ 3 mm)', 'Sin fisuras, sopladuras ni manchas', 'Encuentros y remates según detalle'],
+    obs: 'Fisuras y sopladuras en el paño norte', causa: 'Curado insuficiente por viento', accion: 'Picar las zonas afectadas, reparar y curar 3 días', materiales: 60_000,
+  },
+  {
+    re: /^Instalaciones|^Climatización/, nombre: 'Prueba de instalaciones', tipo: 'control', obligatorio: true, ito: true, cada: 21,
+    checklist: ['Prueba de presión o aislación aprobada', 'Trazado según plano vigente', 'Certificado del instalador'],
+    obs: 'Pérdida de presión en el ramal del baño 2', causa: 'Unión mal soldada', accion: 'Rehacer la unión y repetir la prueba por 24 h', materiales: 45_000,
+  },
+]
+
+/**
+ * Calidad de la demo: protocolos por partida según su avance (los de liberación antes de cada vaciado),
+ * aprobados y visados por el ITO; uno de cada doce se rechaza, abre una NCR que se corrige con HH de
+ * retrabajo (separadas de las HH del RDO, sin cambiar el total) y se aprueba en la reinspección.
+ * Hoy: en el edificio, una liberación por aprobar y un protocolo rechazado en corrección; en la clínica,
+ * una NCR abierta por una inspección. Inspecciones semanales realizadas.
+ */
+function calidadDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'protocolosCalidad' | 'inspeccionesCalidad' | 'noConformidades'> {
+  const H = hoyDia
+  const protocolos: ProtocoloCalidad[] = []
+  const ncrs: NoConformidad[] = []
+  const inspecciones: InspeccionCalidad[] = []
+  const cuadrillas = new Map(d.cuadrillas.map((c) => [c.id, c]))
+  for (const obra of d.obras) {
+    const propios: ProtocoloCalidad[] = []
+    const propiasNcr: NoConformidad[] = []
+    const ito = `ITO ${obra.mandante.replace(/ S\.A\.$/, '')}`
+    const acts = programaDe(d, obra.id, 'actualizado')?.actividades ?? []
+    const dias = new Map<string, { fecha: Dia; cuadrillaId: string }[]>()
+    let ultimoRDO = obra.fechaInicio
+    for (const r of d.rdos) {
+      if (r.obraId !== obra.id || r.estado !== 'validado' || r.fecha > H - 1) continue
+      ultimoRDO = Math.max(ultimoRDO, r.fecha)
+      for (const a of r.avances) if (a.cantidad > 0) dias.set(a.partidaId, [...(dias.get(a.partidaId) ?? []), { fecha: r.fecha, cuadrillaId: r.cuadrillaId }])
+    }
+    const responsableDe = (partidaId: string, cuadrillaId: string) => {
+      const sub = d.subcontratos.find((s) => s.obraId === obra.id && s.compromisos?.[partidaId])
+      return d.proveedores.find((p) => p.id === sub?.subcontratistaId)?.nombre ?? cuadrillas.get(cuadrillaId)?.nombre ?? 'Cuadrilla'
+    }
+    const ubicacion = (partidaId: string, f: Dia, n: number) =>
+      acts.find((a) => a.partidas.some((x) => x.partidaId === partidaId) && (a.inicioReal ?? a.inicio) <= f && f <= (a.finReal ?? a.fin))?.nombre ?? `Frente ${n}`
+    // Retrabajo: 2 trabajadores de la cuadrilla pasan a corregir la NCR (mismas HH totales del RDO)
+    const retrabajo = (partidaId: string, cuadrillaId: string, desde: Dia, hasta: Dia, ncrId: string, horas: number) => {
+      for (const r of d.rdos) {
+        if (r.obraId !== obra.id || r.cuadrillaId !== cuadrillaId || r.estado !== 'validado' || r.fecha < desde || r.fecha > hasta) continue
+        const h = r.hh.find((x) => x.partidaId === partidaId && !x.causaNoProductiva && !x.ncrId && x.trabajadores >= 3 && x.horasNormales > horas)
+        if (!h) continue
+        h.horasNormales = Math.round(((h.trabajadores * h.horasNormales - 2 * horas) / h.trabajadores) * 1000) / 1000
+        r.hh.push({ partidaId, trabajadores: 2, horasNormales: horas, horasExtra: 0, ncrId })
+      }
+    }
+    const aprobado = (f: Dia, por: string, def: (typeof PROTOCOLOS_DEMO)[number]): PasoDoc<EstadoProtocolo>[] => [
+      { fecha: f, estado: 'en_inspeccion', por }, { fecha: f, estado: 'aprobado', por: obra.jefeTerreno },
+      ...(def.ito && f + 1 <= H - 1 ? [{ fecha: f + 1, estado: 'aprobado_ito' as const, por: ito }] : []),
+    ]
+    const rechazar = (base: Omit<ProtocoloCalidad, 'id' | 'numero' | 'checklist' | 'programado' | 'historial' | 'creado'>, def: (typeof PROTOCOLOS_DEMO)[number], f: Dia, cuadrillaId: string, enCurso: boolean) => {
+      const id = `pq_${obra.id}_${propios.length + 1}`
+      const por = cuadrillas.get(cuadrillaId)?.capataz ?? obra.jefeTerreno
+      propios.push({
+        ...base, id, numero: 0, checklist: def.checklist.map((texto, i) => ({ texto, ok: i !== 0 })), programado: f, creado: f - 2, observaciones: def.obs,
+        historial: [{ fecha: f, estado: 'en_inspeccion', por }, { fecha: f, estado: 'rechazado', por: obra.jefeTerreno, texto: def.obs }],
+      })
+      const ncrId = `nc_${obra.id}_${propiasNcr.length + 1}`
+      propiasNcr.push({
+        id: ncrId, obraId: obra.id, partidaId: base.partidaId, numero: 0, origen: 'protocolo', protocoloId: id, descripcion: `${def.nombre} (${base.ubicacion}): ${def.obs}`,
+        causa: def.causa, responsable: base.responsable, accionCorrectiva: def.accion, plazo: f + PLAZO_NCR,
+        ...(enCurso ? {} : { costoMateriales: def.materiales }),
+        historial: [{ fecha: f, estado: 'en_correccion', por: base.responsable }, ...(enCurso ? [] : [{ fecha: f + 1, estado: 'verificada' as const, por: obra.jefeTerreno }, { fecha: f + 2, estado: 'cerrada' as const, por: obra.jefeTerreno }])],
+        creado: f, creadoPor: obra.jefeTerreno,
+      })
+      retrabajo(base.partidaId, cuadrillaId, f, enCurso ? H - 1 : f + 1, ncrId, 4)
+      propios.push({
+        ...base, id: `pq_${obra.id}_${propios.length + 1}`, numero: 0, checklist: def.checklist.map((texto) => enCurso ? { texto } : { texto, ok: true }), programado: enCurso ? H + 1 : f + 1, reinspeccionDe: id, creado: f,
+        historial: enCurso ? [] : aprobado(f + 1, por, def),
+      })
+    }
+    let k = 0
+    let liberacionHoy = false
+    let rechazoHoy = false
+    for (const p of d.partidas.filter((x) => x.obraId === obra.id && !x.ordenCambioId)) {
+      const def = PROTOCOLOS_DEMO.find((x) => x.re.test(p.descripcion))
+      if (!def) continue
+      const lista = (dias.get(p.id) ?? []).sort((a, b) => a.fecha - b.fecha)
+      let prox = -Infinity
+      for (const x of lista) {
+        if (x.fecha < prox) continue
+        prox = x.fecha + def.cada
+        k++
+        const base = {
+          obraId: obra.id, partidaId: p.id, nombre: def.nombre, tipo: def.tipo, obligatorio: def.obligatorio, requiereITO: def.ito,
+          responsable: responsableDe(p.id, x.cuadrillaId), ubicacion: ubicacion(p.id, x.fecha, k), creadoPor: obra.jefeTerreno,
+        }
+        if (k % 12 === 11 && x.fecha + 2 <= H - 1) { rechazar(base, def, x.fecha, x.cuadrillaId, false); continue }
+        propios.push({
+          ...base, id: `pq_${obra.id}_${propios.length + 1}`, numero: 0, checklist: def.checklist.map((texto) => ({ texto, ok: true })), programado: x.fecha, creado: x.fecha - 2,
+          historial: aprobado(x.fecha, cuadrillas.get(x.cuadrillaId)?.capataz ?? obra.jefeTerreno, def),
+        })
+      }
+      const ult = lista.at(-1)
+      // (los RDO de los últimos días pueden estar aún por validar)
+      if (obra.estado !== 'en_ejecucion' || obra.id !== 'obra_aromos' || !ult || ult.fecha < H - 6) continue
+      const base = {
+        obraId: obra.id, partidaId: p.id, nombre: def.nombre, tipo: def.tipo, obligatorio: def.obligatorio, requiereITO: def.ito,
+        responsable: responsableDe(p.id, ult.cuadrillaId), ubicacion: ubicacion(p.id, H, k + 1), creadoPor: obra.jefeTerreno,
+      }
+      // Liberación del próximo vaciado: programada hoy, aún sin inspeccionar (bloquea el avance hasta aprobarse)
+      if (def.tipo === 'liberacion' && !liberacionHoy) {
+        liberacionHoy = true
+        propios.push({ ...base, id: `pq_${obra.id}_${propios.length + 1}`, numero: 0, checklist: def.checklist.map((texto) => ({ texto })), programado: H, creado: H - 1, historial: [] })
+      } else if (def.tipo === 'control' && !def.obligatorio && !rechazoHoy) {
+        // Protocolo rechazado en el último día validado: NCR en corrección y reinspección mañana (RULE-104)
+        rechazoHoy = true
+        rechazar(base, def, ult.fecha, ult.cuadrillaId, true)
+      }
+    }
+    // Inspecciones semanales de Oficina Técnica (realizadas) y la próxima programada
+    const fin = obra.estado === 'en_ejecucion' ? H - 1 : ultimoRDO
+    for (let f = obra.fechaInicio + 7; f <= fin; f += 7)
+      inspecciones.push({ id: `iq_${obra.id}_${f}`, obraId: obra.id, partidaId: null, tipo: 'programada', programada: f, inspector: obra.oficinaTecnica, realizada: { fecha: f, conforme: true, hallazgos: 'Sin observaciones' } })
+    if (obra.estado === 'en_ejecucion') inspecciones.push({ id: `iq_${obra.id}_prox`, obraId: obra.id, partidaId: null, tipo: 'programada', programada: H + 2, inspector: obra.oficinaTecnica })
+    // Clínica: inspección no programada con hallazgo que abre una NCR
+    if (obra.id === 'obra_clinica') {
+      const p = d.partidas.find((x) => x.obraId === obra.id && /Tabiquería|Cielos/.test(x.descripcion) && (dias.get(x.id)?.at(-1)?.fecha ?? -Infinity) >= H - 10)
+      if (p) {
+        const cq = dias.get(p.id)!.at(-1)!.cuadrillaId
+        const hallazgos = 'Tabique del pasillo de pabellón con placas sin junta invertida y tornillos a más de 30 cm'
+        inspecciones.push({ id: `iq_${obra.id}_np`, obraId: obra.id, partidaId: p.id, tipo: 'no_programada', programada: H - 2, inspector: obra.jefeTerreno, realizada: { fecha: H - 2, conforme: false, hallazgos } })
+        propiasNcr.push({
+          id: `nc_${obra.id}_${propiasNcr.length + 1}`, obraId: obra.id, partidaId: p.id, numero: 0, origen: 'inspeccion', inspeccionId: `iq_${obra.id}_np`,
+          descripcion: hallazgos, responsable: cuadrillas.get(cq)?.nombre ?? 'Cuadrilla', plazo: H + 5, historial: [], creado: H - 2, creadoPor: obra.jefeTerreno,
+        })
+      }
+    }
+    // Numeración correlativa por obra en orden de creación
+    propios.sort((a, b) => a.creado - b.creado || a.programado - b.programado).forEach((p, i) => { p.numero = i + 1 })
+    propiasNcr.sort((a, b) => a.creado - b.creado).forEach((n, i) => { n.numero = i + 1 })
+    protocolos.push(...propios)
+    ncrs.push(...propiasNcr)
+  }
+  return { protocolosCalidad: protocolos, inspeccionesCalidad: inspecciones, noConformidades: ncrs }
+}
+
 /**
  * Bodega de la demo: entradas por cada recepción de OC y salidas diarias a partida según el avance de los
  * RDO. Si un día no alcanza el stock, el consumo se registra cuando llega el material (nunca queda negativo).
@@ -1508,7 +1679,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 14
+export const VERSION_DEMO = 15
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1527,7 +1698,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1578,6 +1749,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, maquinariaDemo(d, hoyDia))
   // Caja chica y rendiciones
   Object.assign(d, cajaChicaDemo(d, hoyDia))
+  // Calidad: protocolos, NCR (con HH de retrabajo en los RDO) e inspecciones
+  Object.assign(d, calidadDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

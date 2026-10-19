@@ -4,6 +4,7 @@ import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
 import { epAtrasado } from './estadosPago'
 import { estadoRendicion, observacionesRendicion, totalRendicion } from './cajaChica'
+import { estadoNCR, estadoProtocolo, ncrVencida, protocoloAprobado } from './calidad'
 import { CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, IMPRODUCTIVAS_MAX, indicadoresEquipo, MODALIDAD, UTILIZACION_MIN } from './maquinaria'
 import { controlMateriales, DIAS_COBERTURA, faltantes, TOLERANCIA_CONSUMO } from './bodega'
 import { codigoOC, OTIF_PROVEEDOR_MIN, otifProveedor, URGENTES_MAX, urgentesMes } from './compras'
@@ -52,6 +53,9 @@ export const NOMBRES_REGLA: Record<string, string> = {
   'RULE-206': 'Horas improductivas de maquinaria sobre umbral',
   'RULE-304': 'Compromiso sobre presupuesto de partida',
   'RULE-401': 'Rendición con diferencias o sin respaldo',
+  'RULE-104': 'Protocolo de calidad rechazado',
+  'RULE-111': 'Rework rate sobre umbral',
+  'RULE-112': 'NCR vencida',
   'RULE-305': 'OTIF de proveedor bajo',
   'RULE-306': 'Compras urgentes sobre umbral',
   'RULE-402': 'Estado de pago vencido',
@@ -501,6 +505,45 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         accionRequerida: 'Coordinar frentes de trabajo, operador y combustible para que el equipo no espere.',
         responsable: o.jefeTerreno, kpi: 'KMQ-02', valorKpi: k.improductividad ?? undefined,
       })
+  }
+
+  // Calidad (v1.3): RULE-104 protocolo rechazado cuya reinspección aún no se aprueba
+  const protocolos = d.protocolosCalidad.filter((p) => p.obraId === o.id && p.creado <= c.corte)
+  for (const p of protocolos.filter((x) => estadoProtocolo(x, c.corte) === 'rechazado')) {
+    const re = protocolos.find((x) => x.reinspeccionDe === p.id)
+    if (re && protocoloAprobado(estadoProtocolo(re, c.corte))) continue
+    const partida = d.partidas.find((x) => x.id === p.partidaId)
+    out.push({
+      regla: 'RULE-104', clave: `RULE-104|${p.id}`, severidad: 'media', titulo: `Protocolo N° ${p.numero} rechazado: ${p.nombre}`, entidad: `${partida?.codigo ?? ''} ${partida?.descripcion ?? ''} · ${p.ubicacion}`.trim(),
+      datos: [
+        { etiqueta: 'Observaciones', valor: p.observaciones ?? '—' },
+        { etiqueta: 'Responsable', valor: p.responsable },
+        { etiqueta: 'Reinspección', valor: re ? `N° ${re.numero}, programada el ${fmtFecha(re.programado)}` : 'sin programar' },
+        ...(p.tipo === 'liberacion' ? [{ etiqueta: 'Liberación', valor: 'el avance de la partida queda bloqueado' }] : []),
+      ],
+      porQue: 'El trabajo no cumple el checklist del protocolo: hay que corregir y reinspeccionar.',
+      accionRequerida: 'Corregir lo observado (NCR), registrar las HH de retrabajo y reinspeccionar.',
+      responsable: o.jefeTerreno,
+    })
+  }
+  // RULE-111: rework rate de la semana sobre el umbral
+  if (c.calidad.reworkRate != null && c.calidad.reworkRate > 0.03)
+    out.push({
+      regla: 'RULE-111', clave: 'RULE-111', severidad: c.calidad.reworkRate > 0.06 ? 'alta' : 'media', titulo: `Rework rate de ${pct(c.calidad.reworkRate)} en la semana`, entidad: o.nombre,
+      datos: [{ etiqueta: 'HH de retrabajo (7 días)', valor: num(c.calidad.hhRetrabajo7, 0) }, { etiqueta: 'NCR abiertas', valor: String(c.calidad.ncrAbiertas) }],
+      porQue: 'Las HH de retrabajo empeoran el rendimiento, suman al costo de no calidad y consumen holgura.',
+      accionRequerida: 'Revisar las NCR asociadas y la causa raíz con la cuadrilla o subcontratista.',
+      responsable: o.jefeTerreno, kpi: 'KCA-07', valorKpi: c.calidad.reworkRate, mejorSiMenor: true,
+    })
+  // RULE-112: NCR abierta o en corrección con el plazo vencido
+  for (const n of d.noConformidades.filter((x) => x.obraId === o.id && ncrVencida(x, c.corte))) {
+    out.push({
+      regla: 'RULE-112', clave: `RULE-112|${n.id}`, severidad: 'media', titulo: `NCR N° ${n.numero} vencida`, entidad: n.descripcion,
+      datos: [{ etiqueta: 'Plazo', valor: `${fmtFecha(n.plazo)} (${c.corte - n.plazo} días de atraso)` }, { etiqueta: 'Estado', valor: estadoNCR(n, c.corte) === 'abierta' ? 'Abierta' : 'En corrección' }, { etiqueta: 'Responsable', valor: n.responsable }],
+      porQue: 'La no conformidad sigue sin corregir después de su plazo.',
+      accionRequerida: 'Exigir la corrección al responsable o reprogramar con causa.',
+      responsable: o.jefeTerreno,
+    })
   }
 
   // Caja chica (v1.2): RULE-401 rendición presentada con ítems sin respaldo, sin imputar, sobre el tope o sobre el fondo

@@ -35,6 +35,7 @@ const NAV: Item[] = [
   { to: '/costos', etiqueta: 'Control de costos', roles: ['R01', 'R02', 'R05'], icono: '$' },
   { to: '/caja', etiqueta: 'Flujo de caja', roles: ['R01', 'R02', 'R05', 'R09'], icono: '≋' },
   { to: '/caja-chica', etiqueta: 'Caja chica y rendiciones', roles: ['R01', 'R02', 'R03', 'R09'], icono: '¤' },
+  { to: '/calidad', etiqueta: 'Calidad', roles: ['R01', 'R02', 'R03', 'R04'], icono: '✓' },
   { to: '/estados-pago', etiqueta: 'Estados de pago', roles: ['R01', 'R02', 'R05', 'R09'], icono: '▦' },
   { to: '/ordenes-cambio', etiqueta: 'Órdenes de cambio', roles: ['R01', 'R02', 'R05'], icono: '±' },
   { to: '/contrato', etiqueta: 'Contrato y garantías', roles: ['R01', 'R02', 'R05'], icono: '§' },

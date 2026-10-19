@@ -4,7 +4,9 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { CurvaS } from '../components/graficos'
-import { Card, Kpi, Titulo, Vacio } from '../components/ui'
+import { Boton, Card, Kpi, Titulo, Vacio } from '../components/ui'
+import { estadoProtocolo } from '../domain/calidad'
+import { useStore } from '../store/store'
 import { etapaEP, indicadoresEP, pagadoHasta, presentadoEn, vigente } from '../domain/estadosPago'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
@@ -20,6 +22,7 @@ import { EstadoRFIBadge, EstadoSubmittalBadge } from './Documentos'
 export default function PortalMandante() {
   const { d, c } = useCalc()
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
+  const visar = useStore((s) => s.accionProtocolo)
   if (!c) return null
   const t = hoy()
   const eps = d.estadosPago.filter((e) => e.obraId === c.obra.id && vigente(e, t)).sort((a, b) => b.numero - a.numero)
@@ -35,6 +38,8 @@ export default function PortalMandante() {
   // RFI emitidos y submittals enviados (lo que está en borrador es interno)
   const rfis = d.rfis.filter((r) => r.obraId === c.obra.id && ['emitido', 'respondido'].includes(estadoRFI(r, t) ?? '')).sort((a, b) => b.numero - a.numero)
   const subs = d.submittals.filter((s) => s.obraId === c.obra.id && estadoSubmittal(s, t) === 'enviado').sort((a, b) => b.numero - a.numero)
+  // Protocolos de calidad aprobados por la constructora que esperan el V°B° del ITO
+  const porVisar = d.protocolosCalidad.filter((p) => p.obraId === c.obra.id && p.requiereITO && estadoProtocolo(p, t) === 'aprobado').sort((a, b) => a.programado - b.programado)
   const foliosEnEspera = d.folios.filter((f) => f.obraId === c.obra.id && folioPendiente(f, d.folios, t, d.config.diasHabiles)).length
 
   return (
@@ -81,6 +86,19 @@ export default function PortalMandante() {
                 </li>
               ))}
             </ul>
+          )}
+          {porVisar.length > 0 && (
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <div className="mb-2 text-sm font-medium">Protocolos de calidad por visar ({porVisar.length})</div>
+              <ul className="space-y-2">
+                {porVisar.slice(0, 5).map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2 text-sm">
+                    <span>N° {p.numero} · {p.nombre}<span className="block text-xs text-slate-500">{p.ubicacion} · aprobado por la constructora el {fmtFecha(p.historial.at(-1)!.fecha)}</span></span>
+                    <Boton variante="secundario" className="min-h-0 py-1" onClick={() => visar(p.id, 'visar')}>Dar V°B°</Boton>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           <p className="mt-3 text-xs text-slate-500">
             Tiempo promedio de aprobación: {ind.diasAprobacion != null ? `${Math.round(ind.diasAprobacion)} días` : '—'}

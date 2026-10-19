@@ -25,6 +25,7 @@ import Subcontratos, { DetalleSubcontrato } from './pages/Subcontratos'
 import PortalSubcontratista from './pages/Cumplimiento'
 import Maquinaria, { DetalleEquipo } from './pages/Maquinaria'
 import CajaChica from './pages/CajaChica'
+import Calidad from './pages/Calidad'
 import Explicacion from './pages/Explicacion'
 import Importar from './pages/Importar'
 import Informe from './pages/Informe'
@@ -117,6 +118,7 @@ function Rutas() {
               <Route path="maquinaria" element={<Maquinaria />} />
               <Route path="maquinaria/:id" element={<DetalleEquipo />} />
               <Route path="caja-chica" element={<CajaChica />} />
+              <Route path="calidad" element={<Calidad />} />
               <Route path="4d" element={<Suspense fallback={<Cargando />}><Obra4D /></Suspense>} />
               <Route path="terreno" element={<Terreno />} />
               <Route path="rdo" element={<RDOPage />} />
