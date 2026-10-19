@@ -10,7 +10,7 @@ describe('demo para la nube', () => {
       const ids = (d[c] as { id: string }[]).map((x) => x.id)
       expect(new Set(ids).size, c).toBe(ids.length)
       // Proveedores, materiales y lo comercial son de la empresa (obra_id nulo en la tabla)
-      if (!['obras', 'proveedores', 'materiales', 'clientes', 'leads', 'visitasTecnicas', 'propuestas'].includes(c)) for (const x of d[c] as { obraId?: string }[]) expect(x.obraId, c).toBeTruthy()
+      if (!['obras', 'proveedores', 'materiales', 'clientes', 'leads', 'visitasTecnicas', 'propuestas', 'auditorias'].includes(c)) for (const x of d[c] as { obraId?: string }[]) expect(x.obraId, c).toBeTruthy()
     }
     const resumen = COLECCIONES.map((c) => `${c}:${(d[c] as unknown[]).length}/${Math.round(JSON.stringify(d[c]).length / 1024)}KB`)
     console.log(resumen.join(' '))

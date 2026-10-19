@@ -13,6 +13,7 @@ import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
 import { PLAZO_NCR } from './calidad'
 import { conIVA } from './finanzas'
+import { generarInforme, mesDe } from './auditoria'
 import { inicioGarantia, responsableDe } from './postventa'
 import { mejorFuente, puCostoLinea, rendimientosReales } from './comercial'
 import { RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from './seguridad'
@@ -1960,7 +1961,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 19
+export const VERSION_DEMO = 20
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1979,7 +1980,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [], solicitudesPostventa: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [], solicitudesPostventa: [], auditorias: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -2059,6 +2060,13 @@ function generar(hoyDia: Dia): Datos {
       d.periodos.push(r.periodo)
       d.alertas = r.alertas
     }
+  }
+  // Auditorías mensuales de los dos últimos meses cerrados (14 §14), generadas el día 2 del mes siguiente
+  for (const k of [1, 0]) {
+    let corte = finDeMes(finDeMes(hoyDia) - 31)
+    for (let i = 0; i < k; i++) corte = finDeMes(corte - 31)
+    if (corte < Math.min(...d.obras.map((o) => o.fechaInicio)) + 30) continue
+    d.auditorias.push({ id: `au_${mesDe(corte)}`, mes: mesDe(corte), corte, fecha: corte + 2, generadaPor: 'Gerencia', informe: generarInforme(d, corte) })
   }
   // Una acción correctiva de ejemplo en curso
   const al = d.alertas.find((a) => a.regla === 'RULE-606' && a.estado === 'activa')

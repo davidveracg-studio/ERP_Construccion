@@ -44,6 +44,7 @@ import {
   accionesPropuesta, clienteObservado, estadoLead, estadoPropuesta, margenBajo, puCostoLinea, puedeComercial, puedeVisita, totalesPropuesta, type AccionPropuesta,
 } from '../domain/comercial'
 import { accionesPostventa, inicioGarantia, puedeIngresarPostventa, responsableDe, type AccionPostventa } from '../domain/postventa'
+import { generarInforme, mesDe, nombreMes, ultimoMesCerrado } from '../domain/auditoria'
 import { codigoDTE, conIVA, estadoDTE, puedeAnularConNC, puedeFacturar, puedeTesoreria, siguienteFolio } from '../domain/finanzas'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
@@ -240,6 +241,8 @@ export interface Acciones {
   /** Adjudicar crea la obra en planificación con el itemizado como presupuesto. */
   accionPropuesta: (id: string, accion: AccionPropuesta, x?: { texto?: string; motivo?: Propuesta['motivoRechazo']; fechaInicio?: Dia }) => string | null
   /** RULE-503: la solicitud se asigna al subcontratista de la partida (o a la constructora). */
+  /** Auditoría mensual (14 §14) del último mes cerrado: foto inmutable del informe ejecutivo. */
+  generarAuditoria: () => string | null
   ingresarPostventa: (s: Pick<SolicitudPostventa, 'obraId' | 'solicitante' | 'ubicacion' | 'descripcion' | 'categoria' | 'partidaId'>) => string | null
   accionPostventa: (id: string, accion: AccionPostventa, x?: { diagnostico?: string; categoria?: SolicitudPostventa['categoria']; motivo?: string; costo?: number; cargoSubcontratista?: boolean }) => string | null
 }
@@ -1511,6 +1514,16 @@ export const useStore = create<Estado>()(
           })
           return null
         },
+        generarAuditoria: () => {
+          const st = getS()
+          if (st.ui.rol !== 'R01' && st.ui.rol !== 'R05') return 'La auditoría mensual la genera Gerencia u Oficina Técnica.'
+          const corte = ultimoMesCerrado(hoy())
+          const mes = mesDe(corte)
+          if (st.auditorias.some((a) => a.mes === mes)) return `La auditoría de ${nombreMes(mes)} ya existe (es inmutable).`
+          const informe = generarInforme(st, corte)
+          mutar((x) => ({ auditorias: [...x.auditorias, { id: uid('au'), mes, corte, fecha: hoy(), generadaPor: st.ui.usuario, informe }] }))
+          return null
+        },
         ingresarPostventa: (s) => {
           const st = getS()
           if (!puedeIngresarPostventa(st.ui.rol)) return 'La solicitud la ingresa el mandante o la constructora.'
@@ -1554,7 +1567,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 22,
+      version: 23,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

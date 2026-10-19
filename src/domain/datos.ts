@@ -1,6 +1,6 @@
 import type {
   AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Garantia, Obligacion, Obra, OrdenCambio, Partida,
-  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ProtocoloCalidad, InspeccionCalidad, NoConformidad, CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, DocumentoTributario, TransaccionFinanciera, Cliente, Lead, VisitaTecnica, Propuesta, SolicitudPostventa,
+  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ProtocoloCalidad, InspeccionCalidad, NoConformidad, CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, DocumentoTributario, TransaccionFinanciera, Cliente, Lead, VisitaTecnica, Propuesta, SolicitudPostventa, Auditoria,
 } from './types'
 
 /** Conjunto completo de datos de una empresa (lo que persiste el store). */
@@ -57,6 +57,7 @@ export interface Datos {
   visitasTecnicas: VisitaTecnica[]
   propuestas: Propuesta[]
   solicitudesPostventa: SolicitudPostventa[]
+  auditorias: Auditoria[]
 }
 
 export const CONFIG_DEFECTO: Config = {
@@ -97,13 +98,13 @@ export function programaDe(d: Datos, obraId: string, tipo: Programa['tipo']): Pr
 export const COLECCIONES = [
   'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago', 'ordenesCambio', 'obligaciones', 'garantias', 'recepciones', 'riesgos',
   'documentos', 'rfis', 'submittals', 'folios', 'tareasSemanales',
-  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales', 'equipos', 'partesMaquinaria', 'cajasChicas', 'rendiciones', 'protocolosCalidad', 'inspeccionesCalidad', 'noConformidades', 'charlasSeguridad', 'arts', 'inspeccionesSeguridad', 'observacionesPreventivas', 'incidentes', 'medidasCorrectivas', 'documentosTributarios', 'transacciones', 'clientes', 'leads', 'visitasTecnicas', 'propuestas', 'solicitudesPostventa',
+  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales', 'equipos', 'partesMaquinaria', 'cajasChicas', 'rendiciones', 'protocolosCalidad', 'inspeccionesCalidad', 'noConformidades', 'charlasSeguridad', 'arts', 'inspeccionesSeguridad', 'observacionesPreventivas', 'incidentes', 'medidasCorrectivas', 'documentosTributarios', 'transacciones', 'clientes', 'leads', 'visitasTecnicas', 'propuestas', 'solicitudesPostventa', 'auditorias',
 ] as const
 export type Coleccion = (typeof COLECCIONES)[number]
 
 export function datosVacios(): Datos {
   return {
     config: CONFIG_DEFECTO, obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [], solicitudesPostventa: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [], solicitudesPostventa: [], auditorias: [],
   }
 }
