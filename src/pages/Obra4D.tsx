@@ -2,9 +2,13 @@
 // línea base, sólido = avance real (validado en RDO) hasta hoy y proyección del CPM después.
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import Vista4D, { COLOR_ESTADO, type ModeloBim, type Modo4D } from '../components/Vista4D'
+import Vista4D, { COLOR_ESTADO, type FiltroPiso, type ModeloBim, type Modo4D, type Seleccion4D } from '../components/Vista4D'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
-import { agruparIfc, RUTA_IFC_DEMO } from '../domain/bim'
+import { agruparIfc, origenElemento, reagruparPorActividad, RUTA_IFC_DEMO } from '../domain/bim'
+import { contextoElemento } from '../domain/bimContexto'
+import { ESTADOS_PROTOCOLO, ESTADOS_NCR, TONO_NCR, TONO_PROTOCOLO } from '../domain/calidad'
+import { ESTADOS_INCIDENTE, TONO_INCIDENTE, TIPOS_INCIDENTE } from '../domain/seguridad'
+import { ESTADOS_POSTVENTA, TONO_POSTVENTA } from '../domain/postventa'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { num, pct, pp } from '../domain/formato'
@@ -30,21 +34,25 @@ export default function Obra4D() {
   const [velocidad, setVelocidad] = useState(7)
   const [modo, setModo] = useState<Modo4D>('estado')
   const [editar, setEditar] = useState(false)
+  const [filtro, setFiltro] = useState<FiltroPiso>({ modo: 'todos', piso: 1 })
+  const [seleccion, setSeleccion] = useState<Seleccion4D | null>(null)
+  const [asignando, setAsignando] = useState<{ actividadId: string; ids: Set<number> } | null>(null)
 
   const obra = c?.obra
   const acts = c?.actualizado?.actividades
   const linea = useMemo(() => (c ? lineaTiempo4D(d, c) : null), [d, c])
   const modelo = useMemo(() => (obra && acts ? modeloDe(obra, acts) : null), [obra, acts])
-  const elementos = useMemo(() => (modelo && linea ? elementosDe(modelo, linea.actividades) : []), [modelo, linea])
+  const carga = useGeometriaIfc(modelo?.ifc?.ruta)
+  const geo = carga.estado === 'listo' ? carga.geo : null
+  // Detalle por tarea: los elementos asignados a una actividad forman su propio grupo
+  const bim = useMemo<ModeloBim | null>(() => (geo && modelo ? { geo, grupos: reagruparPorActividad(agruparIfc(geo.niveles, geo.elementos), modelo.enlaces) } : null), [geo, modelo])
+  const elementos = useMemo(() => (modelo && linea ? elementosDe(modelo, linea.actividades, bim?.grupos) : []), [modelo, linea, bim])
   const estados = useMemo(() => (linea && c ? estadoElementos(elementos, linea, t, c) : []), [elementos, linea, t, c])
   const enCurso = useMemo(() => (linea && c ? actividadesEnCurso(linea, t, c) : []), [linea, t, c])
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
-  const carga = useGeometriaIfc(modelo?.ifc?.ruta)
-  const geo = carga.estado === 'listo' ? carga.geo : null
-  const bim = useMemo<ModeloBim | null>(() => (geo ? { geo, grupos: agruparIfc(geo.niveles, geo.elementos) } : null), [geo])
 
-  // Al cambiar de obra se vuelve a hoy
-  useEffect(() => { if (c) { setT(c.corte); setReproduciendo(false) } }, [obra?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Al cambiar de obra se vuelve a hoy, con todos los pisos y sin selección
+  useEffect(() => { if (c) { setT(c.corte); setReproduciendo(false); setSeleccion(null); setAsignando(null); setFiltro({ modo: 'todos', piso: 1 }) } }, [obra?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!reproduciendo || !linea) return
@@ -66,6 +74,19 @@ export default function Obra4D() {
   const momento = tt < linea.corte ? { texto: 'Real (histórico)', tono: 'gris' as const } : tt === linea.corte ? { texto: 'Hoy', tono: 'azul' as const } : { texto: 'Proyección', tono: 'ambar' as const }
   const pos = (x: number) => `${((x - inicio) / Math.max(1, linea.fin - inicio)) * 100}%`
 
+  const alClic = (sel: Seleccion4D | null) => {
+    if (asignando) {
+      if (sel?.ifcId == null) return
+      const ids = new Set(asignando.ids)
+      if (ids.has(sel.ifcId)) ids.delete(sel.ifcId)
+      else ids.add(sel.ifcId)
+      setAsignando({ ...asignando, ids })
+      return
+    }
+    setSeleccion(sel)
+  }
+  const elemSel = seleccion ? estados.find((e) => e.elemento.clave === seleccion.clave) : undefined
+
   const play = () => {
     if (tt >= linea.fin) setT(inicio)
     setReproduciendo((r) => !r)
@@ -74,7 +95,10 @@ export default function Obra4D() {
   return (
     <div className="space-y-4">
       <Titulo sub="Contorno = dónde debería ir la obra según la línea base · sólido = avance real validado (proyección después de hoy)"
-        accion={puedeEditar ? <Boton variante="secundario" onClick={() => setEditar(true)}>Configurar modelo</Boton> : undefined}>
+        accion={puedeEditar ? <>
+          {bim && <Boton variante="secundario" onClick={() => { setSeleccion(null); setReproduciendo(false); setAsignando({ actividadId: '', ids: new Set() }) }}>Asignar elementos a tareas</Boton>}
+          <Boton variante="secundario" onClick={() => setEditar(true)}>Configurar modelo</Boton>
+        </> : undefined}>
         Simulación 4D
       </Titulo>
 
@@ -97,7 +121,7 @@ export default function Obra4D() {
                   <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-marca transition-all" style={{ width: `${carga.progreso * 100}%` }} /></div>
                 </div>
               ) : elementos.length > 0 ? (
-                <Vista4D modelo={modelo} bim={bim} estados={estados} modo={modo} girar={reproduciendo} />
+                <Vista4D modelo={modelo} bim={bim} estados={estados} modo={modo} girar={reproduciendo} filtro={filtro} seleccion={seleccion} asignados={asignando?.ids ?? null} onClic={alClic} />
               ) : (
                 <div className="flex h-full items-center justify-center p-6 text-center text-sm text-slate-500">
                   Ninguna actividad del programa está enlazada al modelo.{puedeEditar && <> Usa “Configurar modelo”.</>}
@@ -108,6 +132,20 @@ export default function Obra4D() {
                 {!obra.modelo4d && <Badge>Modelo inferido de la Carta Gantt</Badge>}
                 {modelo.ifc && carga.estado !== 'error' && <Badge>BIM · {modelo.ifc.nombre}</Badge>}
                 {carga.estado === 'error' && <Badge tono="rojo">No se pudo cargar el IFC: {carga.error} Se muestra el modelo paramétrico.</Badge>}
+              </div>
+              {/* Vista por piso: todos, hasta un piso (corte) o solo uno */}
+              <div className="absolute left-3 top-3 flex items-center gap-1 rounded-lg border border-slate-300 bg-white p-1 text-xs shadow-sm">
+                <select value={filtro.modo} onChange={(e) => setFiltro({ ...filtro, modo: e.target.value as FiltroPiso['modo'] })} className="rounded border-0 bg-transparent py-0.5 pl-1 pr-6 text-xs" aria-label="Vista por piso">
+                  <option value="todos">Todos los pisos</option>
+                  <option value="hasta">Hasta el piso</option>
+                  <option value="solo">Solo el piso</option>
+                </select>
+                {filtro.modo !== 'todos' && (
+                  <select value={filtro.piso} onChange={(e) => setFiltro({ ...filtro, piso: Number(e.target.value) })} className="rounded border-0 bg-transparent py-0.5 pl-1 pr-6 text-xs" aria-label="Piso">
+                    {filtro.modo === 'solo' && <option value={0}>Terreno</option>}
+                    {Array.from({ length: modelo.pisos }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                )}
               </div>
               <div className="absolute right-3 top-3 flex overflow-hidden rounded-lg border border-slate-300 bg-white text-xs shadow-sm">
                 {(['estado', 'realista'] as const).map((m) => (
@@ -151,6 +189,11 @@ export default function Obra4D() {
           </div>
         </Card>
 
+        {asignando && bim ? (
+          <PanelAsignar bim={bim} modelo={modelo} acts={linea.actividades} asignando={asignando} setAsignando={setAsignando} obraId={obra.id} onCerrar={() => setAsignando(null)} />
+        ) : elemSel ? (
+          <FichaElemento e={elemSel} sel={seleccion!} t={tt} linea={linea} onCerrar={() => setSeleccion(null)} />
+        ) : (
         <Card titulo={`En ejecución al ${fmtFecha(tt)}`}>
           {enCurso.length === 0 ? (
             <p className="text-sm text-slate-500">{tt < linea.corte || tt === linea.corte ? 'No hay actividades en ejecución en esta fecha.' : 'Sin actividades proyectadas en esta fecha.'}</p>
@@ -172,7 +215,9 @@ export default function Obra4D() {
             </ul>
           )}
           <Link to="/programa" className="mt-3 block text-sm text-marca">Ver Carta Gantt →</Link>
+          <p className="mt-2 text-xs text-slate-500">Toca un elemento del modelo para ver su ficha.</p>
         </Card>
+        )}
       </div>
 
       {editar && (
@@ -376,5 +421,134 @@ function EditorModelo({ modelo, acts, guardado, obraId, onCerrar }: { modelo: Mo
         </div>
       </div>
     </Modal>
+  )
+}
+
+/** Ficha del elemento tocado en el modelo: actividades, partidas y lo que pasa en ese lugar. */
+function FichaElemento({ e, sel, t, linea, onCerrar }: { e: ReturnType<typeof estadoElementos>[number]; sel: Seleccion4D; t: number; linea: ReturnType<typeof lineaTiempo4D>; onCerrar: () => void }) {
+  const { d, c } = useCalc()
+  if (!c) return null
+  const x = contextoElemento(d, c, linea, t, e.elemento)
+  const lugar = e.elemento.piso === 0 ? 'Terreno' : `Piso ${e.elemento.piso}`
+  const seccion = (titulo: string, n: number, link: string, hijos: React.ReactNode) => (
+    <div className="border-t border-slate-100 pt-2">
+      <div className="mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500"><span>{titulo} ({n})</span><Link to={link} className="normal-case tracking-normal text-marca">Abrir →</Link></div>
+      {n === 0 ? <p className="text-xs text-slate-400">Sin registros en este lugar.</p> : hijos}
+    </div>
+  )
+  return (
+    <Card titulo={<span className="flex items-start justify-between gap-2"><span>{sel.nombre ?? `${CAPAS[e.elemento.capa]} · ${lugar}`}</span><button onClick={onCerrar} className="text-slate-400 hover:text-slate-700" aria-label="Cerrar ficha">✕</button></span>}>
+      <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span>{lugar} · {CAPAS[e.elemento.capa]}{e.elemento.actividad ? ' · asignado a la tarea' : ''}</span>
+          <span className="rounded-full px-2 py-0.5 font-medium text-white" style={{ background: COLOR_ESTADO[e.estado] }}>{ESTADOS_4D[e.estado]}</span>
+          <span className="tabular">plan {pct(e.plan, 0)} · real {pct(e.real, 0)} al {fmtFecha(t)}</span>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Actividades</div>
+          <ul className="space-y-2">
+            {x.actividades.map((a) => (
+              <li key={a.act.id}>
+                <div className="flex justify-between gap-2"><span className="font-medium">{a.act.codigo} {a.act.nombre}</span>{a.critica && <Badge tono="rojo">Crítica</Badge>}</div>
+                <div className="relative mt-1 h-1.5 rounded-full bg-slate-100"><div className="absolute inset-y-0 left-0 rounded-full bg-marca" style={{ width: `${a.real * 100}%` }} /><div className="absolute -top-0.5 h-2.5 w-0.5 bg-slate-700" style={{ left: `${a.plan * 100}%` }} /></div>
+                <div className="tabular text-xs text-slate-500">Real {pct(a.real, 0)} · plan {pct(a.plan, 0)}{a.finLB != null ? ` · línea base al ${fmtFecha(a.finLB - 1)}` : ''}{a.finProyectado != null && a.real < 1 ? ` · proyectado ${fmtFecha(a.finProyectado - 1)}` : ''}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {seccion('Partidas', x.partidas.length, '/costos', (
+          <ul className="space-y-1">{x.partidas.map((p) => <li key={p.p.id} className="flex justify-between gap-2 text-xs"><span>{p.p.codigo} {p.p.descripcion}</span><span className="tabular whitespace-nowrap text-slate-500">{pct(p.avance, 0)} · CPI {p.cpi != null ? num(p.cpi, 2) : '—'}</span></li>)}</ul>
+        ))}
+        {seccion('Protocolos de calidad', x.protocolos.length, '/calidad', (
+          <ul className="space-y-1">{x.protocolos.slice(0, 6).map(({ p, estado }) => <li key={p.id} className="flex justify-between gap-2 text-xs"><span>N° {p.numero} {p.nombre}<span className="block text-slate-500">{p.ubicacion} · {fmtFecha(p.programado)}</span></span><Badge tono={TONO_PROTOCOLO[estado]}>{ESTADOS_PROTOCOLO[estado]}</Badge></li>)}</ul>
+        ))}
+        {seccion('No conformidades', x.ncrs.length, '/calidad', (
+          <ul className="space-y-1">{x.ncrs.map(({ n, estado }) => <li key={n.id} className="flex justify-between gap-2 text-xs"><span>N° {n.numero} {n.descripcion}</span><Badge tono={TONO_NCR[estado]}>{ESTADOS_NCR[estado]}</Badge></li>)}</ul>
+        ))}
+        {seccion('RFI', x.rfis.length, '/documentos', (
+          <ul className="space-y-1">{x.rfis.map(({ r, estado }) => <li key={r.id} className="flex justify-between gap-2 text-xs"><span>RFI {r.numero} · {r.asunto}</span><Badge tono="gris">{estado}</Badge></li>)}</ul>
+        ))}
+        {seccion('Incidentes de seguridad', x.incidentes.length, '/seguridad', (
+          <ul className="space-y-1">{x.incidentes.map(({ i, estado }) => <li key={i.id} className="flex justify-between gap-2 text-xs"><span>{TIPOS_INCIDENTE[i.tipo]} · {i.lugar}<span className="block text-slate-500">{fmtFecha(i.fecha)}</span></span><Badge tono={TONO_INCIDENTE[estado]}>{ESTADOS_INCIDENTE[estado]}</Badge></li>)}</ul>
+        ))}
+        {x.postventa.length > 0 && seccion('Postventa', x.postventa.length, '/postventa', (
+          <ul className="space-y-1">{x.postventa.map(({ s, estado }) => <li key={s.id} className="flex justify-between gap-2 text-xs"><span>N° {s.numero} {s.descripcion}</span><Badge tono={TONO_POSTVENTA[estado]}>{ESTADOS_POSTVENTA[estado]}</Badge></li>)}</ul>
+        ))}
+        <p className="text-xs text-slate-400">Los registros se relacionan por partida y por el piso que menciona su ubicación.</p>
+      </div>
+    </Card>
+  )
+}
+
+/** Detalle por tarea: asigna elementos del IFC a una actividad (clic en el modelo o por filtro). */
+function PanelAsignar({ bim, modelo, acts, asignando, setAsignando, obraId, onCerrar }: {
+  bim: ModeloBim; modelo: Modelo4D; acts: Actividad[]; asignando: { actividadId: string; ids: Set<number> }
+  setAsignando: (a: { actividadId: string; ids: Set<number> }) => void; obraId: string; onCerrar: () => void
+}) {
+  const guardar = useStore((s) => s.guardarModelo4D)
+  const [f, setF] = useState({ texto: '', capa: '' as Capa | '', piso: '' })
+  const [msg, setMsg] = useState<string | null>(null)
+  const elegibles = acts.filter((a) => !a.esHito)
+  const asignadoA = new Map<number, string>()
+  for (const e of modelo.enlaces) if (e.actividadId !== asignando.actividadId) for (const id of e.elementos ?? []) asignadoA.set(id, e.actividadId)
+  const coinciden = bim.geo.elementos.filter((el) => {
+    const o = origenElemento(bim.grupos, el.id)
+    if (!o) return false
+    if (f.capa && o.capa !== f.capa) return false
+    if (f.piso !== '' && o.piso !== Number(f.piso)) return false
+    return !f.texto.trim() || `${el.nombre} ${el.tipo}`.toLowerCase().includes(f.texto.trim().toLowerCase())
+  })
+  const elegir = (actividadId: string) => {
+    const e = modelo.enlaces.find((x) => x.actividadId === actividadId)
+    setAsignando({ actividadId, ids: new Set(e?.elementos ?? []) })
+    setMsg(null)
+  }
+  const enviar = () => {
+    const ids = [...asignando.ids].filter((id) => !asignadoA.has(id))
+    const existe = modelo.enlaces.some((e) => e.actividadId === asignando.actividadId)
+    let enlaces: EnlaceModelo[] = modelo.enlaces.map((e) => (e.actividadId !== asignando.actividadId ? e : (({ elementos: _x, ...r }) => (ids.length ? { ...r, elementos: ids } : r))(e)))
+    if (!existe && ids.length) {
+      const o = origenElemento(bim.grupos, ids[0])!
+      enlaces = [...enlaces, { actividadId: asignando.actividadId, capa: o.capa, pisos: [o.piso], elementos: ids }]
+    }
+    guardar(obraId, { ...modelo, enlaces })
+    setMsg(`Guardado: ${ids.length} elemento(s) asignados.${asignando.ids.size > ids.length ? ' Los que ya eran de otra tarea no se movieron.' : ''}`)
+  }
+  const act = elegibles.find((a) => a.id === asignando.actividadId)
+  return (
+    <Card titulo={<span className="flex items-start justify-between gap-2"><span>Asignar elementos a una tarea</span><button onClick={onCerrar} className="text-slate-400 hover:text-slate-700" aria-label="Cerrar">✕</button></span>}>
+      <div className="space-y-3 text-sm">
+        <Campo etiqueta="Tarea (actividad de la Carta Gantt)">
+          <select className={inputCls} value={asignando.actividadId} onChange={(e) => elegir(e.target.value)}>
+            <option value="">Elige una actividad…</option>
+            {elegibles.map((a) => <option key={a.id} value={a.id}>{a.codigo} {a.nombre}{modelo.enlaces.find((x) => x.actividadId === a.id)?.elementos?.length ? ' ●' : ''}</option>)}
+          </select>
+        </Campo>
+        {act && (
+          <>
+            <p className="rounded-lg bg-violet-50 p-2 text-xs text-violet-900"><b>{asignando.ids.size}</b> elemento(s) en morado. Toca un elemento en el modelo para agregarlo o quitarlo. Los elementos asignados avanzan solo con esta tarea; el resto de su capa y piso sigue la regla general.</p>
+            <div className="rounded-lg border border-slate-200 p-2">
+              <div className="mb-1 text-xs font-medium text-slate-500">Agregar por filtro</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className={cx(inputCls, 'col-span-2 py-1')} placeholder="Nombre contiene (ej.: losa, eje A, fachada sur)" value={f.texto} onChange={(e) => setF({ ...f, texto: e.target.value })} />
+                <select className={cx(inputCls, 'py-1')} value={f.capa} onChange={(e) => setF({ ...f, capa: e.target.value as Capa | '' })}><option value="">Toda capa</option>{(Object.keys(CAPAS) as Capa[]).map((k) => <option key={k} value={k}>{CAPAS[k]}</option>)}</select>
+                <select className={cx(inputCls, 'py-1')} value={f.piso} onChange={(e) => setF({ ...f, piso: e.target.value })}><option value="">Todo piso</option><option value="0">Terreno</option>{Array.from({ length: modelo.pisos }, (_, i) => i + 1).map((n) => <option key={n} value={n}>Piso {n}</option>)}</select>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Boton variante="secundario" className="min-h-0 py-1" disabled={!coinciden.length} onClick={() => setAsignando({ ...asignando, ids: new Set([...asignando.ids, ...coinciden.map((x) => x.id)]) })}>Agregar {coinciden.length}</Boton>
+                <Boton variante="secundario" className="min-h-0 py-1" disabled={!coinciden.length} onClick={() => setAsignando({ ...asignando, ids: new Set([...asignando.ids].filter((id) => !coinciden.some((x) => x.id === id))) })}>Quitar {coinciden.length}</Boton>
+                <Boton variante="fantasma" className="min-h-0 py-1" disabled={!asignando.ids.size} onClick={() => setAsignando({ ...asignando, ids: new Set() })}>Vaciar</Boton>
+              </div>
+            </div>
+            {msg && <p className="text-xs text-emerald-700">{msg}</p>}
+            <div className="flex justify-end gap-2">
+              <Boton variante="secundario" onClick={onCerrar}>Cerrar</Boton>
+              <Boton onClick={enviar}>Guardar asignación</Boton>
+            </div>
+          </>
+        )}
+        <p className="text-xs text-slate-500">Útil para sectorizar: por ejemplo, separar "Losa piso 3, ejes A–D" de "ejes E–H", o la fachada sur de la norte. Lo que no se asigna sigue la regla de capa y piso.</p>
+      </div>
+    </Card>
   )
 }

@@ -6,6 +6,7 @@ import { programaDe, type Datos } from './datos'
 import type { CalcObra, PuntoSerie } from './evm'
 import { puCosto } from './presupuesto'
 import { avanceActividades, fraccionProgramada } from './programa'
+import type { AgrupacionIfc } from './bim'
 import type { Actividad, Capa, Dia, EnlaceModelo, Modelo4D, Obra } from './types'
 
 export const CAPAS: Record<Capa, string> = {
@@ -119,14 +120,28 @@ export interface Elemento {
   piso: number
   /** Cada actividad aporta su avance repartido de abajo hacia arriba entre sus pisos. */
   aportes: { actividadId: string; peso: number; indice: number; total: number }[]
+  /** Grupo de elementos asignados directamente a esta actividad (detalle por tarea). */
+  actividad?: string
 }
 
-export function elementosDe(modelo: Modelo4D, acts: Actividad[]): Elemento[] {
+export function elementosDe(modelo: Modelo4D, acts: Actividad[], bim?: AgrupacionIfc | null): Elemento[] {
   const porId = new Map(acts.map((a) => [a.id, a]))
   const out = new Map<string, Elemento>()
   for (const e of modelo.enlaces) {
     const a = porId.get(e.actividadId)
     if (!a || a.esHito) continue
+    // Detalle por tarea: con IFC, los elementos asignados a la actividad avanzan solo con ella. La
+    // actividad sigue aportando a su capa y pisos para el resto de los elementos (nadie queda huérfano).
+    if (bim && e.elementos?.length) {
+      const ids = e.elementos.filter((id) => bim.claveDe.has(id))
+      if (ids.length) {
+        const clave = `act|${a.id}`
+        const conteo = new Map<number, number>()
+        for (const id of ids) { const k = (bim.original ?? bim.claveDe).get(id); const p = k ? Number(k.split('|')[1]) : 1; conteo.set(p, (conteo.get(p) ?? 0) + 1) }
+        const piso = [...conteo].sort((x, y) => y[1] - x[1])[0]?.[0] ?? 1
+        out.set(clave, { clave, capa: e.capa, piso, aportes: [{ actividadId: a.id, peso: 1, indice: 0, total: 1 }], actividad: a.id })
+      }
+    }
     const pisos = (CAPAS_TERRENO.includes(e.capa) ? [0] : e.pisos.filter((p) => p >= 1 && p <= modelo.pisos)).sort((x, y) => x - y)
     pisos.forEach((piso, indice) => {
       const clave = `${e.capa}|${piso}`

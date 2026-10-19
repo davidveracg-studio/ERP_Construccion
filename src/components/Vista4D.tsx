@@ -5,13 +5,18 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { elementosConstruidos, type AgrupacionIfc } from '../domain/bim'
+import { elementosConstruidos, pisoDominante, type AgrupacionIfc } from '../domain/bim'
 import { CAPAS, ESTADOS_4D, type Estado4D, type EstadoElemento } from '../domain/modelo4d'
 import { pct } from '../domain/formato'
 import type { Capa, Modelo4D } from '../domain/types'
 import type { GeometriaIfc } from '../ifc/extraer'
 
 export type Modo4D = 'estado' | 'realista'
+
+/** Vista por piso: todos, hasta un piso (corte) o solo un piso. */
+export interface FiltroPiso { modo: 'todos' | 'hasta' | 'solo'; piso: number }
+/** Elemento seleccionado: un grupo capa|piso (o de actividad) y, en BIM, el elemento IFC. */
+export interface Seleccion4D { clave: string; ifcId?: number; nombre?: string }
 
 /** Modelo BIM leído y agrupado por capa y piso. */
 export interface ModeloBim {
@@ -120,11 +125,12 @@ function aplicar(p: Parte, f: number) {
 interface Motor {
   construir: (m: Modelo4D, bim: ModeloBim | null) => void
   actualizar: (estados: EstadoElemento[], modo: Modo4D) => void
+  vista: (filtro: FiltroPiso, sel: Seleccion4D | null, asignados: Set<number> | null) => void
   girar: (si: boolean) => void
   destruir: () => void
 }
 
-function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; texto: string[] } | null) => void): Motor {
+function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; texto: string[] } | null) => void, onClic: (s: Seleccion4D | null) => void): Motor {
   const renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.shadowMap.enabled = true
@@ -173,7 +179,14 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   const pluma = new THREE.Group()
   const matGrua = new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.6 })
   scene.add(grua)
-  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc])
+  // Detalle por tarea: elementos asignados a la actividad en edición
+  const matAsignado = new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.6, emissive: '#4c1d95', emissiveIntensity: 0.35 })
+  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc, matAsignado])
+  let filtro: FiltroPiso = { modo: 'todos', piso: 1 }
+  let seleccion: Seleccion4D | null = null
+  let asignados: Set<number> | null = null
+  let marco: THREE.Box3Helper | null = null
+  let ultimoModo: Modo4D = 'estado'
 
   function caja3(s: Spec, mat: THREE.Material) {
     const mesh = new THREE.Mesh(caja, mat)
@@ -203,9 +216,11 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
     const elementos = new Map(bim.geo.elementos.map((x) => [x.id, x]))
     const sombras = bim.geo.mallas.length < 4000
     for (const [clave, ids] of bim.grupos.grupos) {
-      const [capa, piso] = clave.split('|') as [Capa, string]
+      // Grupo de una tarea (act|id): toma la capa y el piso más frecuentes de sus elementos
+      const tarea = clave.startsWith('act|')
+      const [capa, piso] = (tarea ? (bim.grupos.original ?? bim.grupos.claveDe).get(ids[0])?.split('|') ?? ['estructura', '1'] : clave.split('|')) as [Capa, string]
       const mat = nuevoMaterial(capa)
-      const v: Visual = { capa, piso: Number(piso), mat, partes: [], fantasma: [], ifc: [] }
+      const v: Visual = { capa, piso: tarea ? pisoDominante(bim.grupos, ids) : Number(piso), mat, partes: [], fantasma: [], ifc: [] }
       // El material del grupo no cuelga de ninguna malla al limpiar: se libera aparte
       edificio.userData.materiales = [...(edificio.userData.materiales ?? []), mat]
       for (const id of ids) {
@@ -220,7 +235,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
         const mesh = new THREE.Mesh(g, original)
         mesh.receiveShadow = sombras
         const el = elementos.get(id)
-        mesh.userData = { clave, original, sombra: sombras && !x.transparente, nombre: el?.nombre }
+        mesh.userData = { clave, original, sombra: sombras && !x.transparente, nombre: el?.nombre, ifcId: id }
         edificio.add(mesh)
         v.ifc!.push(mesh)
       }
@@ -322,6 +337,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   }
 
   function actualizar(estados: EstadoElemento[], modo: Modo4D) {
+    ultimoModo = modo
     ultimos = new Map(estados.map((e) => [e.elemento.clave, e]))
     let estructuraIniciada = false
     let estructuraPendiente = false
@@ -352,6 +368,42 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       }
     }
     grua.visible = estructuraIniciada && estructuraPendiente
+    aplicarVista()
+  }
+
+  /** Piso visible según el filtro (el terreno cuenta como piso 0). */
+  const pasa = (piso: number) => filtro.modo === 'todos' || (filtro.modo === 'hasta' ? piso <= filtro.piso : piso === filtro.piso)
+
+  /** Filtro por piso, modo de asignación y marco de la selección (después de actualizar el avance). */
+  function aplicarVista() {
+    for (const v of visuales.values()) {
+      if (asignados && v.ifc) {
+        // Asignando: se ve todo el modelo con los elementos de la actividad resaltados
+        for (const mesh of v.ifc) { mesh.visible = true; mesh.material = asignados.has(mesh.userData.ifcId as number) ? matAsignado : mesh.userData.original }
+      }
+      if (pasa(v.piso)) continue
+      for (const p of [...v.partes, ...v.fantasma]) p.mesh.visible = false
+      for (const mesh of v.ifc ?? []) mesh.visible = false
+    }
+    if (filtro.modo !== 'todos') grua.visible = false
+    if (marco) { marco.removeFromParent(); marco.dispose(); marco = null }
+    const vSel = seleccion ? visuales.get(seleccion.clave) : undefined
+    // El marco solo se dibuja si el piso del elemento está a la vista
+    if (seleccion && (!vSel || pasa(vSel.piso))) {
+      const caja3d = new THREE.Box3()
+      const v = vSel
+      if (seleccion.ifcId != null && v?.ifc) {
+        const mesh = v.ifc.find((m) => m.userData.ifcId === seleccion!.ifcId)
+        if (mesh) caja3d.setFromObject(mesh)
+      } else if (v) {
+        for (const p of v.partes) caja3d.union(new THREE.Box3(new THREE.Vector3(p.s.x, p.s.y, p.s.z), new THREE.Vector3(p.s.x + p.s.w, p.s.y + p.s.h, p.s.z + p.s.d)))
+        for (const mesh of v.ifc ?? []) caja3d.expandByObject(mesh)
+      }
+      if (!caja3d.isEmpty()) {
+        marco = new THREE.Box3Helper(caja3d.expandByScalar(0.08), new THREE.Color('#0ea5e9'))
+        scene.add(marco)
+      }
+    }
   }
 
   // Tooltip: elemento bajo el puntero
@@ -375,8 +427,22 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
     })
   }
   const alSalir = () => onTip(null)
+  // Clic (sin arrastrar la cámara): selecciona el elemento o lo asigna a la actividad en edición
+  let abajo: { x: number; y: number } | null = null
+  const alPresionar = (ev: PointerEvent) => { abajo = { x: ev.clientX, y: ev.clientY } }
+  const alSoltar = (ev: PointerEvent) => {
+    if (!abajo || Math.hypot(ev.clientX - abajo.x, ev.clientY - abajo.y) > 5) { abajo = null; return }
+    abajo = null
+    const rect = renderer.domElement.getBoundingClientRect()
+    puntero.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1)
+    ray.setFromCamera(puntero, camera)
+    const hit = ray.intersectObjects(edificio.children, false).find((h) => h.object.visible && h.object.userData.clave)
+    onClic(hit ? { clave: hit.object.userData.clave as string, ifcId: hit.object.userData.ifcId as number | undefined, nombre: hit.object.userData.nombre as string | undefined } : null)
+  }
   renderer.domElement.addEventListener('pointermove', alMover)
   renderer.domElement.addEventListener('pointerleave', alSalir)
+  renderer.domElement.addEventListener('pointerdown', alPresionar)
+  renderer.domElement.addEventListener('pointerup', alSoltar)
 
   const ajustar = () => {
     const w = cont.clientWidth
@@ -405,12 +471,20 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   return {
     construir: (m, bim) => { construir(m, bim); pedir() },
     actualizar: (e, modo) => { actualizar(e, modo); pedir() },
+    vista: (f, sel, asig) => {
+      filtro = f; seleccion = sel; asignados = asig
+      // Se recalcula la visibilidad completa: el filtro de piso oculta y debe poder volver a mostrar
+      actualizar([...ultimos.values()], ultimoModo)
+      pedir()
+    },
     girar: (si) => { controls.autoRotate = si; pedir() },
     destruir: () => {
       cancelAnimationFrame(frame)
       ro.disconnect()
       renderer.domElement.removeEventListener('pointermove', alMover)
       renderer.domElement.removeEventListener('pointerleave', alSalir)
+      renderer.domElement.removeEventListener('pointerdown', alPresionar)
+      renderer.domElement.removeEventListener('pointerup', alSoltar)
       controls.dispose()
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
@@ -424,19 +498,25 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   }
 }
 
-export default function Vista4D({ modelo, bim = null, estados, modo, girar }: { modelo: Modelo4D; bim?: ModeloBim | null; estados: EstadoElemento[]; modo: Modo4D; girar: boolean }) {
+export default function Vista4D({ modelo, bim = null, estados, modo, girar, filtro = { modo: 'todos', piso: 1 }, seleccion = null, asignados = null, onClic }: {
+  modelo: Modelo4D; bim?: ModeloBim | null; estados: EstadoElemento[]; modo: Modo4D; girar: boolean
+  filtro?: FiltroPiso; seleccion?: Seleccion4D | null; asignados?: Set<number> | null; onClic?: (s: Seleccion4D | null) => void
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const motor = useRef<Motor | null>(null)
   const [tip, setTip] = useState<{ x: number; y: number; texto: string[] } | null>(null)
+  const clic = useRef(onClic)
+  clic.current = onClic
 
   useEffect(() => {
-    const m = crearMotor(ref.current!, setTip)
+    const m = crearMotor(ref.current!, setTip, (s) => clic.current?.(s))
     motor.current = m
     return () => { m.destruir(); motor.current = null }
   }, [])
   useEffect(() => { motor.current?.construir(modelo, bim) }, [modelo, bim])
   useEffect(() => { motor.current?.actualizar(estados, modo) }, [estados, modo, modelo, bim])
   useEffect(() => { motor.current?.girar(girar) }, [girar])
+  useEffect(() => { motor.current?.vista(filtro, seleccion, asignados) }, [filtro.modo, filtro.piso, seleccion?.clave, seleccion?.ifcId, asignados, estados, modelo, bim]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={ref} className="relative h-full w-full overflow-hidden rounded-lg" aria-label="Modelo 3D de la obra">
