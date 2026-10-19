@@ -122,16 +122,24 @@ function aplicar(p: Parte, f: number) {
   p.mesh.scale.set(eje === 'x' ? w * local : w, eje === 'y' ? h * local : h, eje === 'z' ? d * local : d)
 }
 
+/** Color del avance del período en la comparación de fechas. */
+export const COLOR_PERIODO = '#0ea5e9'
+
 interface Motor {
   construir: (m: Modelo4D, bim: ModeloBim | null) => void
   actualizar: (estados: EstadoElemento[], modo: Modo4D) => void
+  /** Estado en la fecha A para comparar (null = sin comparación). */
+  comparar: (desde: EstadoElemento[] | null) => void
+  /** Imagen PNG de la vista actual. */
+  captura: () => string
   vista: (filtro: FiltroPiso, sel: Seleccion4D | null, asignados: Set<number> | null) => void
   girar: (si: boolean) => void
   destruir: () => void
 }
 
 function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; texto: string[] } | null) => void, onClic: (s: Seleccion4D | null) => void): Motor {
-  const renderer = new THREE.WebGLRenderer({ antialias: true })
+  // preserveDrawingBuffer: el lienzo se puede imprimir (informe semanal) y exportar como imagen
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
@@ -181,7 +189,11 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   scene.add(grua)
   // Detalle por tarea: elementos asignados a la actividad en edición
   const matAsignado = new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.6, emissive: '#4c1d95', emissiveIntensity: 0.35 })
-  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc, matAsignado])
+  // Comparación de fechas: lo construido entre A y B
+  const matPeriodo = new THREE.MeshStandardMaterial({ color: COLOR_PERIODO, roughness: 0.6, emissive: '#0369a1', emissiveIntensity: 0.25 })
+  const matPeriodoPar = new THREE.MeshStandardMaterial({ color: COLOR_PERIODO, roughness: 0.7 })
+  let desde: Map<string, EstadoElemento> | null = null
+  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc, matAsignado, matPeriodo, matPeriodoPar])
   let filtro: FiltroPiso = { modo: 'todos', piso: 1 }
   let seleccion: Seleccion4D | null = null
   let asignados: Set<number> | null = null
@@ -346,21 +358,25 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       const real = e?.real ?? 0
       const plan = e?.plan ?? 0
       const natural = modo === 'realista' || !e || e.estado === 'terminado' || e.estado === 'pendiente'
+      const realA = desde ? (desde.get(clave)?.real ?? 0) : null
       if (v.ifc) {
         const hechos = elementosConstruidos(v.ifc.length, real)
         const planeados = elementosConstruidos(v.ifc.length, plan)
+        const hechosA = realA != null ? elementosConstruidos(v.ifc.length, realA) : 0
         v.ifc.forEach((mesh, i) => {
           mesh.visible = i < Math.max(hechos, planeados)
-          mesh.material = i < hechos ? (natural ? mesh.userData.original : v.mat) : matFantasmaIfc
+          mesh.material = i >= hechos ? matFantasmaIfc : realA != null ? (i >= hechosA ? matPeriodo : mesh.userData.original) : natural ? mesh.userData.original : v.mat
           mesh.castShadow = i < hechos && mesh.userData.sombra
         })
       }
       for (const p of v.partes) aplicar(p, real)
+      // Paramétrico en comparación: la parte que avanzó en el período se pinta celeste
+      for (const p of v.partes) (p.mesh as THREE.Mesh).material = realA != null && real > realA + 0.001 ? matPeriodoPar : v.mat
       for (const p of v.fantasma) {
         aplicar(p, plan)
         p.mesh.visible = p.mesh.visible && plan > real + 0.005
       }
-      v.mat.color.set(natural ? COLOR_CAPA[v.capa] : COLOR_ESTADO[e!.estado])
+      v.mat.color.set(natural || realA != null ? COLOR_CAPA[v.capa] : COLOR_ESTADO[e!.estado])
       if (v.capa === 'terminaciones') v.mat.opacity = natural ? 0.6 : 0.9
       if (v.capa === 'estructura' && e) {
         if (real > 0) estructuraIniciada = true
@@ -471,6 +487,8 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   return {
     construir: (m, bim) => { construir(m, bim); pedir() },
     actualizar: (e, modo) => { actualizar(e, modo); pedir() },
+    comparar: (d) => { desde = d ? new Map(d.map((e) => [e.elemento.clave, e])) : null; actualizar([...ultimos.values()], ultimoModo); pedir() },
+    captura: () => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/png') },
     vista: (f, sel, asig) => {
       filtro = f; seleccion = sel; asignados = asig
       // Se recalcula la visibilidad completa: el filtro de piso oculta y debe poder volver a mostrar
@@ -498,9 +516,15 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   }
 }
 
-export default function Vista4D({ modelo, bim = null, estados, modo, girar, filtro = { modo: 'todos', piso: 1 }, seleccion = null, asignados = null, onClic }: {
+/** Acceso al visor desde la página (exportar imagen). */
+export interface Visor4D { captura: () => string }
+
+export default function Vista4D({ modelo, bim = null, estados, modo, girar, filtro = { modo: 'todos', piso: 1 }, seleccion = null, asignados = null, onClic, desde = null, visor }: {
   modelo: Modelo4D; bim?: ModeloBim | null; estados: EstadoElemento[]; modo: Modo4D; girar: boolean
   filtro?: FiltroPiso; seleccion?: Seleccion4D | null; asignados?: Set<number> | null; onClic?: (s: Seleccion4D | null) => void
+  /** Estado en la fecha A: activa la comparación de fechas. */
+  desde?: EstadoElemento[] | null
+  visor?: React.MutableRefObject<Visor4D | null>
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const motor = useRef<Motor | null>(null)
@@ -511,11 +535,13 @@ export default function Vista4D({ modelo, bim = null, estados, modo, girar, filt
   useEffect(() => {
     const m = crearMotor(ref.current!, setTip, (s) => clic.current?.(s))
     motor.current = m
-    return () => { m.destruir(); motor.current = null }
+    if (visor) visor.current = { captura: () => m.captura() }
+    return () => { m.destruir(); motor.current = null; if (visor) visor.current = null }
   }, [])
   useEffect(() => { motor.current?.construir(modelo, bim) }, [modelo, bim])
   useEffect(() => { motor.current?.actualizar(estados, modo) }, [estados, modo, modelo, bim])
   useEffect(() => { motor.current?.girar(girar) }, [girar])
+  useEffect(() => { motor.current?.comparar(desde) }, [desde, modelo, bim])
   useEffect(() => { motor.current?.vista(filtro, seleccion, asignados) }, [filtro.modo, filtro.piso, seleccion?.clave, seleccion?.ifcId, asignados, estados, modelo, bim]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

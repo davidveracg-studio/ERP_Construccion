@@ -1,8 +1,9 @@
 // Simulación 4D: la obra en el tiempo sobre un modelo paramétrico o BIM (IFC). Contorno =
 // línea base, sólido = avance real (validado en RDO) hasta hoy y proyección del CPM después.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import Vista4D, { COLOR_ESTADO, type FiltroPiso, type ModeloBim, type Modo4D, type Seleccion4D } from '../components/Vista4D'
+import Vista4D, { COLOR_ESTADO, type FiltroPiso, type ModeloBim, type Modo4D, type Seleccion4D, type Visor4D } from '../components/Vista4D'
+import { avancePeriodo, componerImagen, descargarImagen, LEYENDA_PERIODO } from '../components/Comparacion4D'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
 import { agruparIfc, origenElemento, reagruparPorActividad, RUTA_IFC_DEMO } from '../domain/bim'
 import { contextoElemento } from '../domain/bimContexto'
@@ -10,7 +11,7 @@ import { ESTADOS_PROTOCOLO, ESTADOS_NCR, TONO_NCR, TONO_PROTOCOLO } from '../dom
 import { ESTADOS_INCIDENTE, TONO_INCIDENTE, TIPOS_INCIDENTE } from '../domain/seguridad'
 import { ESTADOS_POSTVENTA, TONO_POSTVENTA } from '../domain/postventa'
 import { serieCurvaS } from '../domain/evm'
-import { fmtFecha, hoy } from '../domain/fechas'
+import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, pct, pp } from '../domain/formato'
 import { borrarIfc, MAX_BYTES_IFC, subirIfc } from '../ifc/archivos'
 import { geometriaIfc, leerIfc, precargarIfc, useGeometriaIfc } from '../ifc/cargar'
@@ -37,6 +38,9 @@ export default function Obra4D() {
   const [filtro, setFiltro] = useState<FiltroPiso>({ modo: 'todos', piso: 1 })
   const [seleccion, setSeleccion] = useState<Seleccion4D | null>(null)
   const [asignando, setAsignando] = useState<{ actividadId: string; ids: Set<number> } | null>(null)
+  // Comparación de fechas: A según el preset (relativo a la fecha de la simulación) o una fecha fija
+  const [comparar, setComparar] = useState<{ tipo: 'semana' | 'mes' | 'inicio' | 'fecha'; fecha: number } | null>(null)
+  const visor = useRef<Visor4D | null>(null)
 
   const obra = c?.obra
   const acts = c?.actualizado?.actividades
@@ -48,6 +52,8 @@ export default function Obra4D() {
   const bim = useMemo<ModeloBim | null>(() => (geo && modelo ? { geo, grupos: reagruparPorActividad(agruparIfc(geo.niveles, geo.elementos), modelo.enlaces) } : null), [geo, modelo])
   const elementos = useMemo(() => (modelo && linea ? elementosDe(modelo, linea.actividades, bim?.grupos) : []), [modelo, linea, bim])
   const estados = useMemo(() => (linea && c ? estadoElementos(elementos, linea, t, c) : []), [elementos, linea, t, c])
+  const fechaA = comparar && linea ? Math.max(linea.inicio, Math.min(t - 1, comparar.tipo === 'semana' ? t - 7 : comparar.tipo === 'mes' ? t - 30 : comparar.tipo === 'inicio' ? linea.inicio : comparar.fecha)) : null
+  const estadosA = useMemo(() => (linea && c && fechaA != null ? estadoElementos(elementos, linea, fechaA, c) : null), [elementos, linea, fechaA, c])
   const enCurso = useMemo(() => (linea && c ? actividadesEnCurso(linea, t, c) : []), [linea, t, c])
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
 
@@ -86,6 +92,19 @@ export default function Obra4D() {
     setSeleccion(sel)
   }
   const elemSel = seleccion ? estados.find((e) => e.elemento.clave === seleccion.clave) : undefined
+  const periodo = fechaA != null ? avancePeriodo(d, c, fechaA, tt) : null
+  const avanzados = estadosA ? estados.filter((e) => e.real > (estadosA.find((x) => x.elemento.clave === e.elemento.clave)?.real ?? 0) + 0.001).length : 0
+  const descargar = async () => {
+    const cap = visor.current?.captura()
+    if (!cap) return
+    const leyenda = fechaA != null ? LEYENDA_PERIODO(fechaA)
+      : [...LEYENDA.map((e) => ({ color: COLOR_ESTADO[e], texto: ESTADOS_4D[e] })), { color: '#64748b', texto: 'Plan (línea base)', borde: true }]
+    const cifras = fechaA != null && periodo
+      ? [`Avance ${pct(periodo.a, 0)} → ${pct(periodo.b, 0)} (${pp(periodo.b - periodo.a)})`, `${avanzados} grupos avanzaron`, `Plan al ${fmtFecha(tt)}: ${pct(periodo.planB, 0)}`]
+      : [`Avance real ${avReal != null ? pct(avReal, 0) : pct(c.avanceReal, 0)}`, `Planificado ${pct(avPlan, 0)}`, `Término proyectado ${fmtFecha(c.terminoProyectado - 1)}`]
+    const sub = fechaA != null ? `Avance del ${fmtFecha(fechaA)} al ${fmtFecha(tt)}` : `${momento.texto} · ${fmtFecha(tt)}${filtro.modo !== 'todos' ? ` · ${filtro.modo === 'solo' ? 'solo' : 'hasta'} el piso ${filtro.piso}` : ''}`
+    descargarImagen(await componerImagen(cap, `${obra.nombre} · Simulación 4D`, sub, leyenda, cifras), `4d-${obra.nombre.toLowerCase().replace(/\s+/g, '-')}-${iso(tt)}.png`)
+  }
 
   const play = () => {
     if (tt >= linea.fin) setT(inicio)
@@ -96,7 +115,7 @@ export default function Obra4D() {
     <div className="space-y-4">
       <Titulo sub="Contorno = dónde debería ir la obra según la línea base · sólido = avance real validado (proyección después de hoy)"
         accion={puedeEditar ? <>
-          {bim && <Boton variante="secundario" onClick={() => { setSeleccion(null); setReproduciendo(false); setAsignando({ actividadId: '', ids: new Set() }) }}>Asignar elementos a tareas</Boton>}
+          {bim && <Boton variante="secundario" onClick={() => { setSeleccion(null); setReproduciendo(false); setComparar(null); setAsignando({ actividadId: '', ids: new Set() }) }}>Asignar elementos a tareas</Boton>}
           <Boton variante="secundario" onClick={() => setEditar(true)}>Configurar modelo</Boton>
         </> : undefined}>
         Simulación 4D
@@ -108,7 +127,11 @@ export default function Obra4D() {
         <Kpi etiqueta={tt > linea.corte ? 'Avance real (a hoy)' : 'Avance real'} valor={avReal != null ? pct(avReal, 0) : pct(c.avanceReal, 0)}
           sub={avReal != null ? `${pp(avReal - avPlan)} vs plan` : 'después de hoy se muestra la proyección'}
           estado={avReal == null ? undefined : avReal - avPlan >= -0.02 ? 'verde' : avReal - avPlan >= -0.06 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Elementos atrasados" valor={atrasados} sub={`de ${estados.filter((e) => e.estado !== 'pendiente').length} iniciados`} estado={atrasados === 0 ? 'verde' : 'amarillo'} />
+        {periodo ? (
+          <Kpi etiqueta={`Avance del período (desde ${fmtFecha(fechaA!)})`} valor={pp(periodo.b - periodo.a)} sub={`${pct(periodo.a, 0)} → ${pct(periodo.b, 0)} · ${avanzados} grupos avanzaron`} />
+        ) : (
+          <Kpi etiqueta="Elementos atrasados" valor={atrasados} sub={`de ${estados.filter((e) => e.estado !== 'pendiente').length} iniciados`} estado={atrasados === 0 ? 'verde' : 'amarillo'} />
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -121,7 +144,7 @@ export default function Obra4D() {
                   <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-marca transition-all" style={{ width: `${carga.progreso * 100}%` }} /></div>
                 </div>
               ) : elementos.length > 0 ? (
-                <Vista4D modelo={modelo} bim={bim} estados={estados} modo={modo} girar={reproduciendo} filtro={filtro} seleccion={seleccion} asignados={asignando?.ids ?? null} onClic={alClic} />
+                <Vista4D modelo={modelo} bim={bim} estados={estados} modo={modo} girar={reproduciendo} filtro={filtro} seleccion={seleccion} asignados={asignando?.ids ?? null} onClic={alClic} desde={asignando ? null : estadosA} visor={visor} />
               ) : (
                 <div className="flex h-full items-center justify-center p-6 text-center text-sm text-slate-500">
                   Ninguna actividad del programa está enlazada al modelo.{puedeEditar && <> Usa “Configurar modelo”.</>}
@@ -162,6 +185,20 @@ export default function Obra4D() {
                 <Boton variante="secundario" onClick={() => { setReproduciendo(false); setT(inicio) }}>Inicio</Boton>
                 <Boton variante="secundario" onClick={() => { setReproduciendo(false); setT(linea.corte) }}>Hoy</Boton>
                 <Boton variante="secundario" onClick={() => { setReproduciendo(false); setT(linea.fin) }}>Término</Boton>
+                <select value={comparar?.tipo ?? ''} aria-label="Comparar con"
+                  onChange={(e) => { const v = e.target.value as '' | 'semana' | 'mes' | 'inicio' | 'fecha'; setReproduciendo(false); setComparar(v ? { tipo: v, fecha: Math.max(inicio, tt - 14) } : null) }}
+                  className={cx(inputCls, 'w-auto')}>
+                  <option value="">Sin comparar</option>
+                  <option value="semana">Comparar con hace 1 semana</option>
+                  <option value="mes">Comparar con hace 1 mes</option>
+                  <option value="inicio">Comparar con el inicio</option>
+                  <option value="fecha">Comparar con una fecha…</option>
+                </select>
+                {comparar?.tipo === 'fecha' && (
+                  <input type="date" className={cx(inputCls, 'w-auto')} aria-label="Fecha A" value={iso(comparar.fecha)} min={iso(inicio)} max={iso(Math.max(inicio, tt - 1))}
+                    onChange={(e) => e.target.value && setComparar({ tipo: 'fecha', fecha: dia(e.target.value) })} />
+                )}
+                <Boton variante="secundario" onClick={descargar}>Descargar imagen</Boton>
                 <select value={velocidad} onChange={(e) => setVelocidad(Number(e.target.value))} className={cx(inputCls, 'ml-auto w-auto')} aria-label="Velocidad">
                   {VELOCIDADES.map((v) => <option key={v.dias} value={v.dias}>{v.etiqueta}</option>)}
                 </select>
@@ -178,6 +215,12 @@ export default function Obra4D() {
                 <span className="text-crit">Contractual {fmtFecha(c.terminoContractual - 1)}</span>
                 <span>Proyectado {fmtFecha(c.terminoProyectado - 1)}</span>
               </div>
+              {fechaA != null ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                  {LEYENDA_PERIODO(fechaA).map((l) => <span key={l.texto} className="flex items-center gap-1.5"><span className={l.borde ? 'h-3 w-3 rounded-sm border border-dashed border-slate-500' : 'h-3 w-3 rounded-sm'} style={l.borde ? undefined : { background: l.color }} />{l.texto}</span>)}
+                  <span>Fecha B: la del control deslizante ({fmtFecha(tt)})</span>
+                </div>
+              ) : (
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
                 {LEYENDA.map((e) => (
                   <span key={e} className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: COLOR_ESTADO[e] }} />{ESTADOS_4D[e]}</span>
@@ -185,6 +228,7 @@ export default function Obra4D() {
                 <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border border-slate-300 bg-stone-300" />Terminado (color de obra)</span>
                 <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border border-dashed border-slate-500" />Plan (línea base)</span>
               </div>
+              )}
             </div>
           </div>
         </Card>

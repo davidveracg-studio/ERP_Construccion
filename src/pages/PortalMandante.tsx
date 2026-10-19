@@ -8,6 +8,7 @@ import { Boton, Card, Kpi, Titulo, Vacio } from '../components/ui'
 import { estadoProtocolo } from '../domain/calidad'
 import { inicioGarantia } from '../domain/postventa'
 import { DetallePostventa, NuevaSolicitud, TablaPostventa } from './Postventa'
+import Comparacion4D from '../components/Comparacion4D'
 import { useStore } from '../store/store'
 import { etapaEP, indicadoresEP, pagadoHasta, presentadoEn, vigente } from '../domain/estadosPago'
 import { serieCurvaS } from '../domain/evm'
@@ -109,6 +110,12 @@ export default function PortalMandante() {
           </p>
         </Card>
       </div>
+
+      {c.actualizado && c.obra.estado === 'en_ejecucion' && (
+        <Card titulo="Avance del último mes en el modelo 3D">
+          <Comparacion4D d={d} c={c} desde={Math.max(c.obra.fechaInicio, c.corte - 30)} hasta={c.corte} titulo="Avance del último mes" alto="h-72" />
+        </Card>
+      )}
 
       {inicioGarantia(d, c.obra.id, t) != null && (
         <Card titulo="Postventa (garantía art. 18 LGUC)" accion={<Boton variante="secundario" onClick={() => setNuevaPv(true)}>Ingresar solicitud</Boton>}>
