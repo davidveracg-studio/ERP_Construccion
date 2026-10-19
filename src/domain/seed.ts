@@ -13,6 +13,7 @@ import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
 import { PLAZO_NCR } from './calidad'
 import { conIVA } from './finanzas'
+import { mejorFuente, puCostoLinea, rendimientosReales } from './comercial'
 import { RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from './seguridad'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
@@ -22,6 +23,7 @@ import type {
   ProtocoloCalidad, NoConformidad, InspeccionCalidad, PasoDoc, EstadoProtocolo,
   TipoTareaCritica, ObservacionPreventiva, Incidente,
   DocumentoTributario,
+  Cliente, Lead, VisitaTecnica, Propuesta, LineaPropuesta, EstadoLead, EstadoPropuesta,
 } from './types'
 
 function rng(seed: number) {
@@ -985,6 +987,108 @@ function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rend
   return { cajasChicas: cajas, rendiciones }
 }
 
+const USUARIO_R06 = 'Daniela Fuentes'
+
+/**
+ * Comercial de la demo: las tres obras nacieron de propuestas adjudicadas (con su itemizado y el margen
+ * que da su venta). Además: una propuesta rechazada por precio, una licitación desierta, un lead perdido
+ * por plazo y uno descartado; dos propuestas enviadas (una a días de vencer su validez, RULE-003), una
+ * en preparación para un cliente recurrente con el APU de los rendimientos reales y una licitación nueva
+ * que cierra en 4 días (RULE-001).
+ */
+function comercialDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'clientes' | 'leads' | 'visitasTecnicas' | 'propuestas'> {
+  const H = hoyDia
+  const clientes: Cliente[] = []
+  const cliente = (nombre: string, tipo: Cliente['tipo'], creado: Dia, rut?: string) => {
+    const c = clientes.find((x) => x.nombre === nombre) ?? { id: `cl_${clientes.length + 1}`, nombre, tipo, estado: 'activo' as const, creado, ...(rut ? { rut } : {}) }
+    if (!clientes.includes(c)) clientes.push(c)
+    return c
+  }
+  const leads: Lead[] = []
+  const visitas: VisitaTecnica[] = []
+  const propuestas: Propuesta[] = []
+  const lead = (c: Cliente, nombre: string, origen: Lead['origen'], linea: string, ubicacion: string, monto: number, creado: Dia, pasos: [Dia, EstadoLead][], extra: Partial<Lead> = {}) => {
+    const l: Lead = {
+      id: `ld_${leads.length + 1}`, numero: leads.length + 1, clienteId: c.id, nombre, origen, lineaNegocio: linea, ubicacion, montoEstimado: monto, responsable: USUARIO_R06,
+      historial: pasos.map(([fecha, estado]) => ({ fecha, estado, por: USUARIO_R06 })), creado, creadoPor: USUARIO_R06, ...extra,
+    }
+    leads.push(l)
+    return l
+  }
+  const propuesta = (l: Lead, lineas: LineaPropuesta[], gg: number, margen: number, plazoDias: number, creado: Dia, pasos: [Dia, EstadoPropuesta][], extra: Partial<Propuesta> = {}) => {
+    const enviada = pasos.find(([, e]) => e === 'enviada')?.[0]
+    const p: Propuesta = {
+      id: `pr_${propuestas.length + 1}`, leadId: l.id, numero: 300 + propuestas.length + 1, version: 1, lineas, gg, margen, plazoDias, validezHasta: (enviada ?? creado) + 30,
+      exclusiones: 'Permisos y derechos municipales, aportes reembolsables y empalmes.',
+      ...(enviada != null ? { aprobacion: { fecha: enviada, por: 'Gerencia' } } : {}),
+      historial: pasos.map(([fecha, estado]) => ({ fecha, estado, por: estado === 'en_revision' ? USUARIO_R06 : USUARIO_R06 })), creado, creadoPor: USUARIO_R06, ...extra,
+    }
+    propuestas.push(p)
+    return p
+  }
+  const lineasDe = (obraId: string): LineaPropuesta[] => d.partidas.filter((p) => p.obraId === obraId && !p.ordenCambioId).map((p) => ({
+    id: `lp_${p.id}`, codigo: p.codigo, capitulo: p.capitulo, descripcion: p.descripcion, unidad: p.unidad, cantidad: p.cantidad, recursos: p.recursos.map((r) => ({ ...r })),
+  }))
+  // Las obras en cartera nacieron de propuestas adjudicadas: el margen es el que da su venta contratada
+  for (const o of d.obras) {
+    const c = cliente(o.mandante, /Inmobiliaria/.test(o.mandante) ? 'inmobiliaria' : 'empresa', o.fechaInicio - 120)
+    const ini = o.fechaInicio
+    const l = lead(c, o.nombre, o.id === 'obra_aromos' ? 'solicitud' : 'licitacion', o.lineaNegocio, 'La Serena', 0, ini - 100, [[ini - 95, 'en_estudio'], [ini - 60, 'propuesta_enviada'], [ini - 30, 'ganado']])
+    const lineas = lineasDe(o.id)
+    const cd = lineas.reduce((s, x) => s + x.cantidad * puCostoLinea(x), 0)
+    const venta = d.partidas.filter((p) => p.obraId === o.id && !p.ordenCambioId).reduce((s, p) => s + p.cantidad * p.puVenta, 0)
+    l.montoEstimado = Math.round(venta / 1_000_000) * 1_000_000
+    propuesta(l, lineas, o.ggPresupuesto, 1 - (cd + o.ggPresupuesto) / venta, o.plazoDias, ini - 80, [[ini - 65, 'en_revision'], [ini - 60, 'enviada'], [ini - 30, 'adjudicada']], { obraId: o.id })
+  }
+  const catalogo = rendimientosReales(d, H - 1)
+  const desde = (descripcion: string, cantidad: number, codigo: string, capitulo: string): LineaPropuesta | null => {
+    const r = catalogo.find((x) => x.descripcion === descripcion)
+    const f = r && mejorFuente(r)
+    const base = d.partidas.find((p) => p.descripcion === descripcion)
+    if (!r || !base) return null
+    return {
+      id: `lp_${codigo}_${descripcion.length}`, codigo, capitulo, descripcion, unidad: r.unidad, cantidad,
+      recursos: f ? f.recursosReales : base.recursos.map((x) => ({ ...x })), fuente: f ? `Real · ${f.obra}` : `Presupuesto · ${d.obras.find((o) => o.id === base.obraId)?.nombre ?? ''}`,
+    }
+  }
+  const colegio = cliente('Colegio Los Andes', 'empresa', H - 200, '76.412.300-5')
+  const muni = cliente('Municipalidad de La Serena', 'publico', H - 180, '69.040.100-7')
+  const agricola = cliente('Agrícola Limarí SpA', 'empresa', H - 160)
+  const altomar = cliente('Inmobiliaria Altomar', 'inmobiliaria', H - 90, '77.120.880-1')
+  // Cliente recurrente: el mandante de las bodegas vuelve a licitar
+  const puerto = clientes.find((c) => /Logística Puerto/.test(c.nombre)) ?? cliente('Logística Puerto Coquimbo S.A.', 'empresa', H - 20)
+  const particular = cliente('Rodrigo Saavedra', 'persona', H - 50)
+  const clinica = clientes.find((c) => /Clínica/.test(c.nombre))!
+  const l4 = lead(colegio, 'Ampliación Colegio Los Andes', 'licitacion', 'Edificación', 'La Serena', 380_000_000, H - 120, [[H - 118, 'en_estudio'], [H - 95, 'propuesta_enviada'], [H - 60, 'perdido']], { motivo: 'Propuesta rechazada (precio)' })
+  propuesta(l4, [desde('Albañilería de ladrillo', 900, '1.1', '1 Obra gruesa'), desde('Estucos', 1800, '2.1', '2 Terminaciones'), desde('Pintura', 3200, '2.2', '2 Terminaciones')].filter((x): x is LineaPropuesta => !!x),
+    32_000_000, 0.13, 150, H - 110, [[H - 100, 'en_revision'], [H - 95, 'enviada'], [H - 60, 'rechazada']], { motivoRechazo: 'precio' })
+  const l5 = lead(muni, 'Cesfam Las Compañías: reposición de cubiertas', 'licitacion', 'Remodelaciones', 'La Serena', 210_000_000, H - 90, [[H - 88, 'en_estudio'], [H - 70, 'propuesta_enviada'], [H - 40, 'perdido']], { motivo: 'Licitación desierta' })
+  propuesta(l5, [desde('Cubierta y revestimientos', 1400, '1.1', '1 Cubiertas'), desde('Pintura', 900, '1.2', '1 Cubiertas')].filter((x): x is LineaPropuesta => !!x),
+    14_000_000, 0.1, 75, H - 85, [[H - 75, 'en_revision'], [H - 70, 'enviada'], [H - 40, 'desierta']])
+  lead(agricola, 'Packing Agrícola Limarí', 'solicitud', 'Industrial', 'Ovalle', 650_000_000, H - 150, [[H - 148, 'en_estudio'], [H - 75, 'perdido']], { motivo: 'El mandante exigía 4 meses de plazo: no alcanzamos' })
+  lead(particular, 'Vivienda particular Saavedra', 'referido', 'Edificación', 'La Serena', 95_000_000, H - 50, [[H - 47, 'descartado']], { motivo: 'No postulamos: fuera de nuestro rango de obras' })
+  // Enviadas en espera de respuesta
+  const l8 = lead(altomar, 'Edificio Altomar etapa 1', 'solicitud', 'Edificación', 'Coquimbo', 2_400_000_000, H - 70, [[H - 68, 'en_estudio'], [H - 26, 'propuesta_enviada']])
+  visitas.push({ id: 'vt_1', leadId: l8.id, fecha: H - 60, responsable: USUARIO_R06, estado: 'realizada', notas: 'Terreno plano con acceso por calle principal; empalme eléctrico a 80 m; mecánica de suelos disponible.' })
+  propuesta(l8, [desde('Excavación masiva', 4200, '1.1', '1 Movimiento de tierra'), desde('Hormigón estructural H-30', 2600, '2.1', '2 Obra gruesa'), desde('Enfierradura', 260_000, '2.2', '2 Obra gruesa'), desde('Moldaje', 13_500, '2.3', '2 Obra gruesa'), desde('Albañilería de ladrillo', 3400, '3.1', '3 Albañilería')].filter((x): x is LineaPropuesta => !!x),
+    120_000_000, 0.105, 300, H - 40, [[H - 30, 'en_revision'], [H - 26, 'enviada']])
+  const l9 = lead(colegio, 'Gimnasio Colegio Los Andes', 'solicitud', 'Edificación', 'La Serena', 310_000_000, H - 30, [[H - 29, 'en_estudio'], [H - 6, 'propuesta_enviada']])
+  propuesta(l9, [desde('Radier H-25 e = 15 cm', 900, '1.1', '1 Obra gruesa'), desde('Estructura metálica', 1, '1.2', '1 Obra gruesa'), desde('Cubierta y revestimientos', 1100, '1.3', '1 Obra gruesa')].filter((x): x is LineaPropuesta => !!x),
+    22_000_000, 0.12, 120, H - 20, [[H - 9, 'en_revision'], [H - 6, 'enviada']])
+  // En preparación: cliente recurrente, APU desde los rendimientos reales
+  const l10 = lead(clinica, 'Remodelación sucursal Clínica Elqui Coquimbo', 'solicitud', 'Remodelaciones', 'Coquimbo', 160_000_000, H - 15, [[H - 14, 'en_estudio']])
+  visitas.push({ id: 'vt_2', leadId: l10.id, fecha: H - 5, responsable: USUARIO_R06, estado: 'realizada', notas: 'Dos pisos en operación: trabajo por sectores y en horario nocturno en pabellón.' })
+  visitas.push({ id: 'vt_3', leadId: l10.id, fecha: H + 2, responsable: 'Andrés Muñoz', estado: 'agendada' })
+  propuesta(l10, [desde('Demoliciones y retiros', 260, '1.1', '1 Demoliciones'), desde('Tabiquería volcometal', 480, '2.1', '2 Obra civil'), desde('Cielos modulares', 390, '2.2', '2 Obra civil'), desde('Pintura', 1500, '3.1', '3 Terminaciones')].filter((x): x is LineaPropuesta => !!x).concat([
+      // Las partidas globales (gl) no se escalan entre obras: se cotizan
+      { id: 'lp_elec_suc', codigo: '4.1', capitulo: '4 Instalaciones', descripcion: 'Instalaciones eléctricas', unidad: 'gl', cantidad: 1, recursos: [{ tipo: 'SUB', descripcion: 'Cotización Eléctrica Norte', cantPorUnidad: 1, unidad: 'gl', precio: 14_500_000 }], fuente: 'Cotización · Eléctrica Norte Ltda.' },
+    ]),
+    9_500_000, 0.13, 80, H - 4, [])
+  // Licitación nueva que cierra pronto (RULE-001)
+  lead(puerto, 'Galpón logístico Puerto Coquimbo', 'licitacion', 'Industrial', 'Coquimbo', 1_100_000_000, H - 3, [], { fechaCierre: H + 4, responsable: undefined })
+  return { clientes, leads, visitasTecnicas: visitas, propuestas }
+}
+
 /**
  * Facturas electrónicas de la demo: una por EP facturado, con folio correlativo de la empresa en orden de
  * emisión y aceptadas por el SII al día siguiente. La tercera fue rechazada (RUT del receptor) y se
@@ -1821,7 +1925,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 17
+export const VERSION_DEMO = 18
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1840,7 +1944,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [], documentosTributarios: [], transacciones: [], clientes: [], leads: [], visitasTecnicas: [], propuestas: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1897,6 +2001,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, calidadDemo(d, hoyDia))
   // Seguridad: charlas, ART, inspecciones, observaciones, incidentes y medidas
   Object.assign(d, seguridadDemo(d, hoyDia))
+  // Comercial: clientes, leads, visitas y propuestas (las obras nacieron de propuestas adjudicadas)
+  Object.assign(d, comercialDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades
