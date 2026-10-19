@@ -12,12 +12,14 @@ import { aplicarAprobacion, etapaOC, partidasNuevas } from './ordenesCambio'
 import { estadoObraPorRecepcion } from './contrato'
 import { f301Vigente } from './cumplimiento'
 import { PLAZO_NCR } from './calidad'
+import { RIESGOS_TAREA, TAREAS_CRITICAS, TEMAS_CHARLA } from './seguridad'
 import { hhPorUnidad, puCosto } from './presupuesto'
 import { cerrarPeriodo } from './periodos'
 import type {
   Actividad, CategoriaRiesgo, Compromiso, CondicionesPago, CostoReal, Cuadrilla, Dia, Escala5, EstadoPago, EstadoRiesgo, Garantia, Generador, Obligacion, Obra, OrdenCambio,
   Partida, Programa, RDO, Recurso, ReglaMapeo, Riesgo, TipoRecurso, Documento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ItemRendicion,
   ProtocoloCalidad, NoConformidad, InspeccionCalidad, PasoDoc, EstadoProtocolo,
+  TipoTareaCritica, ObservacionPreventiva, Incidente,
 } from './types'
 
 function rng(seed: number) {
@@ -981,6 +983,114 @@ function cajaChicaDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'cajasChicas' | 'rend
   return { cajasChicas: cajas, rendiciones }
 }
 
+/** Tareas críticas de las partidas de la demo (RULE-803). */
+const CRITICAS_DEMO: [RegExp, TipoTareaCritica][] = [[/^Excavación/, 'excavacion'], [/^Hormigón estructural|^Moldaje/, 'altura'], [/^Estructura metálica/, 'izaje'], [/^Cubierta/, 'altura']]
+const PREVENCIONISTA = 'Marcela Ríos'
+
+/**
+ * Seguridad de la demo: charla diaria de cada cuadrilla y ART de cada tarea crítica en todos los días
+ * con RDO, inspección semanal de Prevención, observaciones preventivas cerradas en plazo e incidentes:
+ * cuasi accidentes y un accidente sin tiempo perdido en el edificio (el último en investigación, con su
+ * medida en curso), un cuasi accidente en la clínica y un accidente con tiempo perdido, ya cerrado, en
+ * las bodegas. Hoy aún no hay charlas: el capataz la registra antes de enviar su reporte.
+ */
+function seguridadDemo(d: Datos, hoyDia: Dia): Pick<Datos, 'charlasSeguridad' | 'arts' | 'inspeccionesSeguridad' | 'observacionesPreventivas' | 'incidentes' | 'medidasCorrectivas'> {
+  const H = hoyDia
+  for (const p of d.partidas) {
+    const t = CRITICAS_DEMO.find(([re]) => re.test(p.descripcion))?.[1]
+    if (t) p.tareaCritica = t
+  }
+  const cuadrillas = new Map(d.cuadrillas.map((c) => [c.id, c]))
+  const partidas = new Map(d.partidas.map((p) => [p.id, p]))
+  const out: ReturnType<typeof seguridadDemo> = { charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [] }
+  // Charla y ART de cada día con reporte
+  for (const r of d.rdos) {
+    if (r.fecha > H - 1 || (r.estado !== 'validado' && r.estado !== 'enviado')) continue
+    const cq = cuadrillas.get(r.cuadrillaId)
+    if (!cq) continue
+    const k = r.fecha + cq.nombre.length
+    out.charlasSeguridad.push({
+      id: `ch_${r.cuadrillaId}_${r.fecha}`, obraId: r.obraId, fecha: r.fecha, cuadrillaId: r.cuadrillaId, tema: TEMAS_CHARLA[k % TEMAS_CHARLA.length],
+      relator: cq.capataz, asistentes: cq.trabajadores - (k % 7 === 0 ? 1 : 0), creadoPor: cq.capataz,
+    })
+    const ids = new Set([...r.avances.filter((a) => a.cantidad > 0).map((a) => a.partidaId), ...r.hh.filter((h) => h.partidaId && !h.causaNoProductiva).map((h) => h.partidaId!)])
+    for (const id of ids) {
+      const p = partidas.get(id)
+      if (!p?.tareaCritica) continue
+      const base = RIESGOS_TAREA[p.tareaCritica]
+      out.arts.push({
+        id: `art_${r.cuadrillaId}_${id}_${r.fecha}`, obraId: r.obraId, fecha: r.fecha, cuadrillaId: r.cuadrillaId, partidaId: id, tarea: p.tareaCritica,
+        descripcion: `${p.descripcion} (${TAREAS_CRITICAS[p.tareaCritica].toLowerCase()})`, riesgos: base.riesgos, medidas: base.medidas,
+        firmantes: Math.max(2, r.hh.filter((h) => h.partidaId === id).reduce((s, h) => Math.max(s, h.trabajadores), 0) || cq.trabajadores), responsable: cq.capataz, creadoPor: cq.capataz,
+      })
+    }
+  }
+  const OBS: [ObservacionPreventiva['tipo'], boolean, string][] = [
+    ['conducta', false, 'Trabajador sin barbiquejo en el casco en zona de izaje'],
+    ['condicion', false, 'Extensión eléctrica sin protección cruzando el acceso'],
+    ['conducta', true, 'Cuadrilla revisa arneses antes de subir: buena práctica'],
+    ['condicion', false, 'Borde de losa sin baranda en sector norte'],
+    ['condicion', false, 'Acopio de fierro obstruyendo vía de evacuación'],
+    ['conducta', true, 'Señalero dirige correctamente la descarga del camión'],
+  ]
+  let nInc = 0
+  for (const obra of d.obras) {
+    const enCurso = obra.estado === 'en_ejecucion'
+    const fin = enCurso ? H - 1 : Math.max(obra.fechaInicio, ...d.rdos.filter((r) => r.obraId === obra.id).map((r) => r.fecha))
+    const capataz = d.cuadrillas.find((q) => q.obraId === obra.id)?.capataz ?? obra.jefeTerreno
+    const cuadrilla = d.cuadrillas.find((q) => q.obraId === obra.id)?.nombre ?? 'Cuadrilla'
+    // Inspección semanal de Prevención
+    for (let f = obra.fechaInicio + 3, k = 0; f <= fin; f += 7, k++) {
+      out.inspeccionesSeguridad.push({
+        id: `is_${obra.id}_${f}`, obraId: obra.id, programada: f, inspector: PREVENCIONISTA,
+        realizada: { fecha: f, cumplimiento: [0.96, 0.92, 1, 0.94, 0.9][k % 5], hallazgos: k % 3 === 1 ? 'Orden y aseo deficiente en acopios; se instruyó a la cuadrilla' : 'Sin hallazgos relevantes' },
+      })
+    }
+    if (enCurso) out.inspeccionesSeguridad.push({ id: `is_${obra.id}_prox`, obraId: obra.id, programada: H + 1, inspector: PREVENCIONISTA })
+    // Observaciones preventivas cada 4 días, las inseguras corregidas dentro del plazo
+    for (let f = obra.fechaInicio + 2, k = 0; f <= fin; f += 4, k++) {
+      const [tipo, segura, descripcion] = OBS[(k + obra.nombre.length) % OBS.length]
+      const cierre = f + 1 + (k % 2)
+      out.observacionesPreventivas.push({
+        id: `op_${obra.id}_${f}`, obraId: obra.id, fecha: f, tipo, segura, descripcion, responsable: segura ? '' : obra.jefeTerreno, plazo: f + 3,
+        ...(segura ? { cerrada: f } : cierre <= H - 1 ? { cerrada: cierre } : {}), creadoPor: k % 2 ? PREVENCIONISTA : obra.jefeTerreno,
+      })
+    }
+    // Incidentes
+    const inc = (fecha: Dia, tipo: Incidente['tipo'], descripcion: string, lugar: string, extra: Partial<Incidente>, pasos: [number, Incidente['historial'][number]['estado']][]): Incidente => {
+      const i: Incidente = {
+        id: `in_${obra.id}_${++nInc}`, obraId: obra.id, numero: 0, fecha, tipo, descripcion, lugar, empresa: d.config.empresa || 'Constructora', ...extra,
+        historial: pasos.map(([dd, estado]) => ({ fecha: fecha + dd, estado, por: PREVENCIONISTA })), creado: fecha, creadoPor: capataz,
+      }
+      out.incidentes.push(i)
+      return i
+    }
+    const medida = (i: Incidente, descripcion: string, plazo: Dia, cumplida?: Dia) => out.medidasCorrectivas.push({
+      id: `mc_${i.id}_${out.medidasCorrectivas.length}`, obraId: obra.id, origen: { tipo: 'incidente', id: i.id }, descripcion, responsable: obra.jefeTerreno, plazo,
+      ...(cumplida != null ? { cumplida: { fecha: cumplida, evidencia: 'Verificado en terreno con registro fotográfico', por: PREVENCIONISTA } } : {}), creado: i.fecha + 2, creadoPor: PREVENCIONISTA,
+    })
+    const propios = out.incidentes.length
+    if (obra.id === 'obra_aromos') {
+      for (const f of [obra.fechaInicio + 30, obra.fechaInicio + 65])
+        if (f <= H - 10) inc(f, 'cuasi', 'Caída de herramienta desde andamio sin rodapié, sin personas en la zona', 'Frente de obra gruesa', { potencial: 'bajo' }, [[1, 'clasificado'], [1, 'cerrado']])
+      const stp = inc(H - 20, 'sin_tiempo_perdido', 'Corte superficial en la mano al manipular panel de moldaje', 'Losa piso 3', { afectado: NOMBRES_DEMO[3], diasPerdidos: 0, causas: 'Guantes de cabritilla en mal estado' }, [[1, 'clasificado'], [2, 'en_investigacion'], [4, 'medidas_en_curso'], [8, 'cerrado']])
+      medida(stp, 'Reponer guantes anticorte a la cuadrilla de moldajes', H - 14, H - 15)
+      const cuasi = inc(H - 2, 'cuasi', 'Paño de moldaje se desprendió del gancho de la grúa durante el izaje', 'Grúa torre, sector norte', { potencial: 'alto', causas: 'Estrobo con desgaste no detectado en la revisión' }, [[0, 'clasificado'], [1, 'en_investigacion'], [1, 'medidas_en_curso']])
+      medida(cuasi, 'Reemplazar estrobos y registrar revisión diaria de elementos de izaje', H + 5)
+    } else if (obra.id === 'obra_clinica') {
+      if (H - 9 > obra.fechaInicio) inc(H - 9, 'cuasi', 'Plancha de cielo cae desde el andamio móvil, sin personas debajo', 'Pasillo de pabellones', { potencial: 'bajo' }, [[1, 'clasificado'], [1, 'cerrado']])
+    } else {
+      const f = obra.fechaInicio + 40
+      const ctp = inc(f, 'con_tiempo_perdido', 'Esguince de tobillo al bajar del andamio sin usar la escala', 'Montaje de estructura', {
+        afectado: NOMBRES_DEMO[7], empresa: cuadrilla, diasPerdidos: 5, causas: 'Acceso al andamio sin escala fija', protocolo: { diat: f + 1 },
+      }, [[0, 'clasificado'], [1, 'en_investigacion'], [3, 'medidas_en_curso'], [15, 'cerrado']])
+      medida(ctp, 'Instalar escalas fijas en todos los andamios y charla de acceso seguro', f + 7, f + 6)
+    }
+    out.incidentes.slice(propios).sort((a, b) => a.fecha - b.fecha).forEach((i, k) => { i.numero = k + 1 })
+  }
+  return out
+}
+
 /** Protocolos de la demo según la partida: checklist, frecuencia (días) y la observación típica de un rechazo. */
 const PROTOCOLOS_DEMO: {
   re: RegExp; nombre: string; tipo: ProtocoloCalidad['tipo']; obligatorio: boolean; ito: boolean; cada: number; checklist: string[]
@@ -1679,7 +1789,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 15
+export const VERSION_DEMO = 16
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {
@@ -1698,7 +1808,7 @@ function generar(hoyDia: Dia): Datos {
   const d: Datos = {
     config: { ...structuredClone(CONFIG_DEFECTO), demoGenerada: hoyDia, demoVersion: VERSION_DEMO },
     obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [],
   }
   for (const spec of [OBRA_AROMOS, OBRA_CLINICA, OBRA_BODEGAS]) {
     const s = simular(spec, hoyDia)
@@ -1751,6 +1861,8 @@ function generar(hoyDia: Dia): Datos {
   Object.assign(d, cajaChicaDemo(d, hoyDia))
   // Calidad: protocolos, NCR (con HH de retrabajo en los RDO) e inspecciones
   Object.assign(d, calidadDemo(d, hoyDia))
+  // Seguridad: charlas, ART, inspecciones, observaciones, incidentes y medidas
+  Object.assign(d, seguridadDemo(d, hoyDia))
   // El edificio trae un modelo BIM de ejemplo para la simulación 4D (public/demo)
   const aromos = d.obras.find((o) => o.id === 'obra_aromos')
   const actsAromos = d.programas.find((p) => p.obraId === 'obra_aromos' && p.tipo === 'actualizado')?.actividades

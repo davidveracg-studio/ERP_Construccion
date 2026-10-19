@@ -1,6 +1,6 @@
 import type {
   AjusteForecast, Alerta, Compromiso, Config, CostoReal, Cuadrilla, EstadoPago, Garantia, Obligacion, Obra, OrdenCambio, Partida,
-  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ProtocoloCalidad, InspeccionCalidad, NoConformidad,
+  PeriodoControl, Programa, RDO, RecepcionObra, ReglaMapeo, Riesgo, Documento, RFI, Submittal, Folio, TareaSemanal, Proveedor, Material, SolicitudMaterial, OrdenCompra, MovimientoStock, Subcontrato, EPSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, Rendicion, ProtocoloCalidad, InspeccionCalidad, NoConformidad, CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva,
 } from './types'
 
 /** Conjunto completo de datos de una empresa (lo que persiste el store). */
@@ -44,6 +44,12 @@ export interface Datos {
   protocolosCalidad: ProtocoloCalidad[]
   inspeccionesCalidad: InspeccionCalidad[]
   noConformidades: NoConformidad[]
+  charlasSeguridad: CharlaSeguridad[]
+  arts: ART[]
+  inspeccionesSeguridad: InspeccionSeguridad[]
+  observacionesPreventivas: ObservacionPreventiva[]
+  incidentes: Incidente[]
+  medidasCorrectivas: MedidaCorrectiva[]
 }
 
 export const CONFIG_DEFECTO: Config = {
@@ -66,6 +72,8 @@ export const CONFIG_DEFECTO: Config = {
     cotizacionesUf: 100,
     limiteSubcontratoUf: 500,
     limiteRendicionUf: 10,
+    charlaObligatoria: true,
+    metaIF: 20,
   },
   valorUF: 40_000,
   metodoEAC: 'cpi',
@@ -82,13 +90,13 @@ export function programaDe(d: Datos, obraId: string, tipo: Programa['tipo']): Pr
 export const COLECCIONES = [
   'obras', 'partidas', 'programas', 'cuadrillas', 'rdos', 'costos', 'compromisos', 'reglasMapeo', 'ajustes', 'periodos', 'alertas', 'estadosPago', 'ordenesCambio', 'obligaciones', 'garantias', 'recepciones', 'riesgos',
   'documentos', 'rfis', 'submittals', 'folios', 'tareasSemanales',
-  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales', 'equipos', 'partesMaquinaria', 'cajasChicas', 'rendiciones', 'protocolosCalidad', 'inspeccionesCalidad', 'noConformidades',
+  'proveedores', 'materiales', 'solicitudesMaterial', 'ordenesCompra', 'movimientosStock', 'subcontratos', 'epsSubcontrato', 'trabajadores', 'documentosLaborales', 'equipos', 'partesMaquinaria', 'cajasChicas', 'rendiciones', 'protocolosCalidad', 'inspeccionesCalidad', 'noConformidades', 'charlasSeguridad', 'arts', 'inspeccionesSeguridad', 'observacionesPreventivas', 'incidentes', 'medidasCorrectivas',
 ] as const
 export type Coleccion = (typeof COLECCIONES)[number]
 
 export function datosVacios(): Datos {
   return {
     config: CONFIG_DEFECTO, obras: [], partidas: [], programas: [], cuadrillas: [], rdos: [], costos: [],
-    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [],
+    compromisos: [], reglasMapeo: [], ajustes: [], periodos: [], alertas: [], estadosPago: [], ordenesCambio: [], obligaciones: [], garantias: [], recepciones: [], riesgos: [], documentos: [], rfis: [], submittals: [], folios: [], tareasSemanales: [], proveedores: [], materiales: [], solicitudesMaterial: [], ordenesCompra: [], movimientosStock: [], subcontratos: [], epsSubcontrato: [], trabajadores: [], documentosLaborales: [], equipos: [], partesMaquinaria: [], cajasChicas: [], rendiciones: [], protocolosCalidad: [], inspeccionesCalidad: [], noConformidades: [], charlasSeguridad: [], arts: [], inspeccionesSeguridad: [], observacionesPreventivas: [], incidentes: [], medidasCorrectivas: [],
   }
 }

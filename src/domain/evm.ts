@@ -3,6 +3,7 @@
 import { calcularCaja, type ResumenCaja } from './caja'
 import { compromisoOC, indicadoresCompras, type IndicadoresCompras } from './compras'
 import { indicadoresCalidad, type IndicadoresCalidad } from './calidad'
+import { indicadoresSeguridad, type IndicadoresSeguridad } from './seguridad'
 import { calcularCPM, type ResultadoCPM } from './cpm'
 import { programaDe, type Datos } from './datos'
 import { diaSemana, diasHabilesEntre } from './fechas'
@@ -118,6 +119,7 @@ export interface CalcObra {
   /** Indicadores de abastecimiento (v1.2, semáforo Compras). */
   compras: IndicadoresCompras
   calidad: IndicadoresCalidad
+  seguridad: IndicadoresSeguridad
 }
 
 const TIPOS: TipoRecurso[] = ['MO', 'MAT', 'EQ', 'SUB', 'OTRO']
@@ -407,6 +409,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
   calculado.caja = calcularCaja(d, calculado)
   calculado.compras = indicadoresCompras(d.ordenesCompra, d.solicitudesMaterial, obraId, corte)
   calculado.calidad = indicadoresCalidad(d, obraId, corte, calculado.ac)
+  calculado.seguridad = indicadoresSeguridad(d, obraId, calculado.obra.fechaInicio, corte)
   return calculado
 }
 

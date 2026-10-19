@@ -36,12 +36,17 @@ import {
   accionesNCR, accionesProtocolo, ESTADO_POR_ACCION, ESTADO_POR_ACCION_NCR, estadoProtocolo, PLAZO_NCR, protocolosFaltantes, puedeCrearNCR, puedeCrearProtocolo,
   puedeProgramarInspeccion, validarAccionProtocolo, type AccionNCR, type AccionProtocolo,
 } from '../domain/calidad'
+import {
+  accionesIncidente, ESTADO_POR_ACCION_INC, puedeART, puedeCharla, puedeCumplirMedida, puedeGestionarSST, puedeMarcarCritica, puedeObservar, puedeReportarIncidente,
+  validarAccionIncidente, type AccionIncidente,
+} from '../domain/seguridad'
 import { abiertaCaja, estadoRendicion, puedeAdministrarCaja, puedeRendir, puedeRevisarItem, saldoCaja } from '../domain/cajaChica'
 import { generarDemo } from '../domain/seed'
 import { modoNube } from '../lib/supabase'
 import type {
   AccionCorrectiva, Actividad, AjusteForecast, Compromiso, CondicionesPago, Config, CostoReal, Cuadrilla, Dia, EstadoAccion,
   EstadoPago, Garantia, Modelo4D, Obligacion, Obra, OrdenCambio, Partida, RecepcionObra, Programa, RDO, ReglaMapeo, Riesgo, Rol, TipoRecurso, Documento, RevisionDocumento, RFI, Submittal, Folio, TareaSemanal, Restriccion, CausaNoCumplimiento, Proveedor, Material, SolicitudMaterial, OrdenCompra, LineaOC, MovimientoStock, TipoMovimiento, Subcontrato, EPSubcontrato, AjusteSubcontrato, Trabajador, DocumentoLaboral, Equipo, ParteMaquinaria, CajaChica, ItemRendicion, ProtocoloCalidad, NoConformidad, InspeccionCalidad,
+  CharlaSeguridad, ART, InspeccionSeguridad, ObservacionPreventiva, Incidente, MedidaCorrectiva, TipoTareaCritica,
 } from '../domain/types'
 
 export interface UI {
@@ -57,6 +62,7 @@ export const USUARIOS: Record<Rol, string> = {
   R04: 'Luis Pérez',
   R05: 'Andrés Muñoz',
   R07: 'Patricia Lagos',
+  R08: 'Marcela Ríos',
   R09: 'Lorena Castro',
   R10: 'Sergio Pizarro (Eléctrica Norte)',
   R11: 'ITO del mandante',
@@ -196,6 +202,19 @@ export interface Acciones {
   programarInspeccion: (i: Omit<InspeccionCalidad, 'id' | 'realizada'>) => string | null
   /** Si no es conforme abre una NCR por los hallazgos. */
   realizarInspeccion: (id: string, r: { conforme: boolean; hallazgos: string; partidaId?: string; responsable?: string }) => string | null
+  registrarCharla: (c: Omit<CharlaSeguridad, 'id' | 'creadoPor'>) => string | null
+  registrarART: (a: Omit<ART, 'id' | 'creadoPor'>) => string | null
+  programarInspeccionSeg: (i: Omit<InspeccionSeguridad, 'id' | 'realizada'>) => string | null
+  realizarInspeccionSeg: (id: string, r: { cumplimiento: number; hallazgos: string }) => string | null
+  registrarObservacion: (o: Omit<ObservacionPreventiva, 'id' | 'creadoPor' | 'cerrada'>) => string | null
+  cerrarObservacion: (id: string) => string | null
+  /** RULE-802: un accidente grave o fatal parte con el protocolo legal pendiente. */
+  reportarIncidente: (i: Pick<Incidente, 'obraId' | 'fecha' | 'tipo' | 'descripcion' | 'lugar' | 'empresa'> & { afectado?: string }) => string | null
+  accionIncidente: (id: string, accion: AccionIncidente, x?: { tipo?: Incidente['tipo']; potencial?: Incidente['potencial']; diasPerdidos?: number; causas?: string }) => string | null
+  pasoProtocolo: (id: string, paso: keyof NonNullable<Incidente['protocolo']>) => string | null
+  crearMedida: (m: Omit<MedidaCorrectiva, 'id' | 'creado' | 'creadoPor' | 'cumplida'>) => string | null
+  cumplirMedida: (id: string, evidencia: string) => string | null
+  marcarTareaCritica: (partidaId: string, tarea: TipoTareaCritica | null) => string | null
 }
 
 export type Estado = Datos & { ui: UI } & Acciones
@@ -1192,6 +1211,100 @@ export const useStore = create<Estado>()(
           })
           return null
         },
+        registrarCharla: (c) => {
+          const s = getS()
+          if (!puedeCharla(s.ui.rol)) return 'La charla la registra el capataz, el jefe de terreno o Prevención.'
+          if (!c.tema.trim() || !(c.asistentes > 0)) return 'Indica el tema y los asistentes.'
+          if (s.charlasSeguridad.some((x) => x.obraId === c.obraId && x.fecha === c.fecha && x.cuadrillaId === c.cuadrillaId)) return 'Esa charla ya está registrada.'
+          mutar((x) => ({ charlasSeguridad: [...x.charlasSeguridad, { ...c, id: uid('ch'), tema: c.tema.trim(), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        registrarART: (a) => {
+          const s = getS()
+          if (!puedeART(s.ui.rol)) return 'El ART lo registra el capataz, el jefe de terreno o Prevención.'
+          if (!a.medidas.length || !(a.firmantes > 0)) return 'Indica las medidas de control y los trabajadores que firmaron.'
+          mutar((x) => ({ arts: [...x.arts, { ...a, id: uid('art'), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        programarInspeccionSeg: (i) => {
+          const s = getS()
+          if (!puedeGestionarSST(s.ui.rol)) return 'Las inspecciones de seguridad las programa Prevención.'
+          mutar((x) => ({ inspeccionesSeguridad: [...x.inspeccionesSeguridad, { ...i, id: uid('is') }] }))
+          return null
+        },
+        realizarInspeccionSeg: (id, r) => {
+          const s = getS()
+          if (!puedeGestionarSST(s.ui.rol)) return 'La inspección la registra Prevención.'
+          if (!(r.cumplimiento >= 0 && r.cumplimiento <= 1)) return 'El cumplimiento va de 0 a 100 %.'
+          mutar((x) => ({ inspeccionesSeguridad: x.inspeccionesSeguridad.map((y) => (y.id === id ? { ...y, realizada: { fecha: hoy(), cumplimiento: r.cumplimiento, hallazgos: r.hallazgos.trim() || 'Sin hallazgos' } } : y)) }))
+          return null
+        },
+        registrarObservacion: (o) => {
+          const s = getS()
+          if (!puedeObservar(s.ui.rol)) return 'Tu rol no registra observaciones preventivas.'
+          if (!o.descripcion.trim() || (!o.segura && !o.responsable.trim())) return 'Indica la observación y quién corrige.'
+          mutar((x) => ({ observacionesPreventivas: [...x.observacionesPreventivas, { ...o, id: uid('op'), descripcion: o.descripcion.trim(), responsable: o.responsable.trim(), creadoPor: s.ui.usuario, ...(o.segura ? { cerrada: o.fecha } : {}) }] }))
+          return null
+        },
+        cerrarObservacion: (id) => {
+          const s = getS()
+          if (!puedeObservar(s.ui.rol)) return 'Tu rol no cierra observaciones.'
+          mutar((x) => ({ observacionesPreventivas: x.observacionesPreventivas.map((o) => (o.id === id ? { ...o, cerrada: hoy() } : o)) }))
+          return null
+        },
+        reportarIncidente: (i) => {
+          const s = getS()
+          if (!puedeReportarIncidente(s.ui.rol)) return 'Tu rol no reporta incidentes.'
+          if (!i.descripcion.trim() || !i.lugar.trim()) return 'Indica qué pasó y dónde.'
+          const t = hoy()
+          if (i.fecha > t) return 'La fecha no puede ser futura.'
+          const numero = Math.max(0, ...s.incidentes.filter((x) => x.obraId === i.obraId).map((x) => x.numero)) + 1
+          const nuevo: Incidente = { ...i, id: uid('in'), numero, descripcion: i.descripcion.trim(), lugar: i.lugar.trim(), afectado: i.afectado?.trim() || undefined, historial: [], creado: t, creadoPor: s.ui.usuario }
+          mutar((x) => ({ incidentes: [...x.incidentes, nuevo] }))
+          return null
+        },
+        accionIncidente: (id, accion, x = {}) => {
+          const s = getS()
+          const i = s.incidentes.find((y) => y.id === id)
+          if (!i) return 'El incidente no existe.'
+          const t = hoy()
+          if (!accionesIncidente(i, t, s.ui.rol).includes(accion)) return 'Solo Prevención gestiona el incidente en este estado.'
+          const actualizado: Incidente = {
+            ...i,
+            ...(accion === 'clasificar' ? { tipo: x.tipo ?? i.tipo, potencial: x.potencial, diasPerdidos: x.diasPerdidos } : {}),
+            ...(x.causas?.trim() ? { causas: x.causas.trim() } : {}),
+          }
+          const error = validarAccionIncidente(s, actualizado, accion, t, x)
+          if (error) return error
+          mutar((st) => ({ incidentes: st.incidentes.map((y) => (y.id === id ? { ...actualizado, historial: [...y.historial, { fecha: t, estado: ESTADO_POR_ACCION_INC[accion], por: s.ui.usuario }] } : y)) }))
+          return null
+        },
+        pasoProtocolo: (id, paso) => {
+          const s = getS()
+          if (!puedeGestionarSST(s.ui.rol) && s.ui.rol !== 'R02') return 'El protocolo lo registra Prevención o el administrador de obra.'
+          mutar((x) => ({ incidentes: x.incidentes.map((i) => (i.id === id ? { ...i, protocolo: { ...i.protocolo, [paso]: hoy() } } : i)) }))
+          return null
+        },
+        crearMedida: (m) => {
+          const s = getS()
+          if (!puedeGestionarSST(s.ui.rol)) return 'Las medidas correctivas las define Prevención.'
+          if (!m.descripcion.trim() || !m.responsable.trim()) return 'Indica la medida y el responsable.'
+          mutar((x) => ({ medidasCorrectivas: [...x.medidasCorrectivas, { ...m, id: uid('mc'), descripcion: m.descripcion.trim(), responsable: m.responsable.trim(), creado: hoy(), creadoPor: s.ui.usuario }] }))
+          return null
+        },
+        cumplirMedida: (id, evidencia) => {
+          const s = getS()
+          if (!puedeCumplirMedida(s.ui.rol)) return 'Tu rol no registra el cumplimiento de medidas.'
+          if (!evidencia.trim()) return 'Indica la evidencia del cumplimiento.'
+          mutar((x) => ({ medidasCorrectivas: x.medidasCorrectivas.map((m) => (m.id === id ? { ...m, cumplida: { fecha: hoy(), evidencia: evidencia.trim(), por: s.ui.usuario } } : m)) }))
+          return null
+        },
+        marcarTareaCritica: (partidaId, tarea) => {
+          const s = getS()
+          if (!puedeMarcarCritica(s.ui.rol)) return 'Las tareas críticas las define Prevención o el jefe de terreno.'
+          mutar((x) => ({ partidas: x.partidas.map((p) => (p.id !== partidaId ? p : tarea ? { ...p, tareaCritica: tarea } : (({ tareaCritica: _t, ...r }) => r)(p))) }))
+          return null
+        },
         guardarCondicionesPago: (obraId, c) =>
           mutar((s) => ({ obras: s.obras.map((o) => (o.id === obraId ? { ...o, condicionesPago: c } : o)) })),
       }
@@ -1199,7 +1312,7 @@ export const useStore = create<Estado>()(
     {
       name: 'obrai-datos',
       // Si cambia el modelo de datos de la demo, se regenera (sin backend aún, 03 §6)
-      version: 18,
+      version: 19,
       migrate: () => datosIniciales() as unknown as Estado,
       // En modo nube la caché se hidrata por empresa, después de iniciar sesión (sync.ts)
       skipHydration: modoNube,

@@ -98,8 +98,9 @@ export const ACCIONES_SUB: Record<AccionSub, string> = {
 }
 const PERMISOS_SUB: Partial<Record<EstadoSubcontrato, Partial<Record<AccionSub, Rol[]>>>> = {
   borrador: { firmar: ['R02', 'R01'] },
-  en_acreditacion: { acreditar: ['R02'] },
-  vigente: { suspender: ['R02'], terminar: ['R02'], resolver: ['R01'] },
+  // R08 acredita (19 nota 10) y puede suspender por seguridad sin aprobación del administrador (RN-P05)
+  en_acreditacion: { acreditar: ['R08', 'R02'] },
+  vigente: { suspender: ['R02', 'R08'], terminar: ['R02'], resolver: ['R01'] },
   suspendido: { reanudar: ['R02'], resolver: ['R01'] },
   terminado: { cerrar: ['R02'] },
 }
