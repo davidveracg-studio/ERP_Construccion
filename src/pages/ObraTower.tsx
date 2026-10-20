@@ -5,6 +5,7 @@ import { AlertaCard } from '../components/AlertaCard'
 import { BarrasAvance, CurvaS } from '../components/graficos'
 import { SemaforoEjecutivo } from '../components/Semaforo'
 import { Badge, Card, Kpi, Titulo, cx } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { idx, mm, pct, pp } from '../domain/formato'
@@ -32,7 +33,7 @@ export default function ObraTower() {
   return (
     <div className="space-y-5">
       <Titulo sub={`${o.mandante} · Administrador: ${o.administrador} · inicio ${fmtFecha(o.fechaInicio)} · plazo ${o.plazoDias} días`}
-        accion={<><Link to="/informe" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Informe semanal</Link><Link to="/cierre" className="rounded-lg bg-marca px-3 py-2 text-sm text-white">Cerrar semana</Link></>}>
+        accion={<><GuiaFigura figura="health-score" titulo="Cómo se calcula el Health Score" texto="Siete tubos comunicantes, uno por dimensión y con el ancho de su peso. Al abrir la válvula el agua se nivela en el promedio ponderado; un accidente grave baja el tope a 59." /><Link to="/informe" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Informe semanal</Link><Link to="/cierre" className="rounded-lg bg-marca px-3 py-2 text-sm text-white">Cerrar semana</Link></>}>
         {o.nombre} {score != null && <span className="ml-2 align-middle"><Badge tono={score >= 80 ? 'verde' : score >= 60 ? 'ambar' : 'rojo'}>Health Score {Math.round(score)}</Badge></span>}
       </Titulo>
 

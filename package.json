@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -b --noEmit",
-    "figuras": "node tools/figura-4d/build.mjs && node tools/figura-4d/build.mjs --light"
+    "figuras": "node tools/figuras/build-all.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",

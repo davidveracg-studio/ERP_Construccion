@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { calcularObra } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, pct } from '../domain/formato'
@@ -40,7 +41,7 @@ export default function PlanSemanal() {
   return (
     <div className="space-y-4">
       <Titulo sub={`${c.obra.nombre} · plan de corto plazo por cuadrilla, restricciones y cumplimiento`}
-        accion={puedePlanificar(rol) ? <Boton onClick={() => setNueva(true)}>Nueva tarea</Boton> : undefined}>
+        accion={<><GuiaFigura figura="last-planner" titulo="Cómo se lee el Last Planner" texto="Cada semana se comprometen tareas del plan intermedio. Si sólo se comprometen tareas sin restricciones (rejilla cerrada) el PPC sube; comprometer a ciegas lo hunde." />{puedePlanificar(rol) && <Boton onClick={() => setNueva(true)}>Nueva tarea</Boton>}</>}>
         Plan semanal (Last Planner)
       </Titulo>
 

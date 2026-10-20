@@ -2,6 +2,7 @@
 import { Fragment, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { Badge, Boton, Campo, Card, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import type { CalcPartida } from '../domain/evm'
 import { fmtFecha } from '../domain/fechas'
 import { idx, mm, num, pct } from '../domain/formato'
@@ -33,7 +34,7 @@ export default function Costos() {
 
   return (
     <div className="space-y-4">
-      <Titulo sub="Presupuesto → Comprometido → Ejecutado → Proyectado por partida" accion={<Boton variante="secundario" onClick={exportar}>Exportar a Excel (CSV)</Boton>}>Control de costos</Titulo>
+      <Titulo sub="Presupuesto → Comprometido → Ejecutado → Proyectado por partida" accion={<><GuiaFigura figura="curva-s" titulo="Cómo se lee el valor ganado (EVM)" texto="Tres probetas: lo planificado (PV), lo ganado (EV, lo que vale lo construido) y lo gastado (AC). Mueve la semana y compara alturas: SPI = EV ÷ PV mide plazo y CPI = EV ÷ AC mide costo." /><Boton variante="secundario" onClick={exportar}>Exportar a Excel (CSV)</Boton></>}>Control de costos</Titulo>
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         {([['partidas', 'Por partida'], ['sin_imputar', `Sin imputar (${sinImputar.length})`], ['compromisos', 'Compromisos'], ['ajustes', `Ajustes de forecast${pendientes.length ? ` (${pendientes.length} por aprobar)` : ''}`]] as [Tab, string][]).map(([k, n]) => (
           <button key={k} onClick={() => setTab(k)} className={cx('-mb-px border-b-2 px-3 py-2 text-sm', tab === k ? 'border-marca font-medium text-marca' : 'border-transparent text-slate-600')}>{n}</button>

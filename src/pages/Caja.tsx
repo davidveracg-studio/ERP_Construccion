@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { FlujoCaja } from '../components/graficos'
 import { Boton, Campo, Card, Kpi, Modal, Titulo, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { EtapaBadge } from './EstadosPago'
 import { condicionesDe, consolidarCaja, TIPOS_MOVIMIENTO, type Movimiento } from '../domain/caja'
 import { etapaEP } from '../domain/estadosPago'
@@ -36,6 +37,7 @@ export default function Caja() {
       <Titulo sub="Caja disponible = capital de trabajo asignado + cobros − pagos. Real hasta hoy; después, lo comprometido y lo estimado según el avance proyectado. Montos netos, sin IVA."
         accion={
           <div className="flex flex-wrap items-center gap-2">
+            <GuiaFigura figura="caja" titulo="Cómo se lee la caja de la obra" texto="Un estanque que se llena con los cobros de EP (40 días después del corte) y se vacía con cada pago; el 5 % retenido espera en un estanque aparte hasta después de la recepción. El punto más bajo es el capital de trabajo que la obra necesita." />
             <div className="flex overflow-hidden rounded-lg border border-slate-300 text-sm" role="radiogroup" aria-label="Vista">
               {(['obra', 'cartera'] as const).map((v) => (
                 <button key={v} role="radio" aria-checked={vista === v} onClick={() => setVista(v)}

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { Gantt } from '../components/Gantt'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { dia, fmtFecha, iso } from '../domain/fechas'
 import { pct } from '../domain/formato'
 import { useCalc } from '../store/hooks'
@@ -33,7 +34,7 @@ export default function Programa() {
   return (
     <div className="space-y-4">
       <Titulo sub={`Línea base v${c.lb?.version ?? '—'} (${c.lb?.motivo ?? ''}) · barras grises = línea base, color = proyectado, rojo = ruta crítica`}
-        accion={rol === 'R05' || rol === 'R02' ? <Boton variante="secundario" onClick={() => setModal(true)}>Solicitar re-baseline</Boton> : undefined}>
+        accion={<><GuiaFigura figura="ruta-critica" titulo="Cómo se lee la ruta crítica" texto="Dos varillas empujan la fecha de término: la crítica la mueve con cada día de atraso; la otra tiene holgura y avanza en vacío hasta consumirla." />{(rol === 'R05' || rol === 'R02') && <Boton variante="secundario" onClick={() => setModal(true)}>Solicitar re-baseline</Boton>}</>}>
         Carta Gantt
       </Titulo>
 

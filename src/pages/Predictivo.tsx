@@ -4,6 +4,7 @@
 // Modelos estadísticos deterministas y reproducibles: no usa IA generativa.
 import { useMemo, useState } from 'react'
 import { Badge, Campo, Card, Kpi, Titulo, Vacio, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { estadoPropuesta } from '../domain/comercial'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { mm, num, pct } from '../domain/formato'
@@ -22,7 +23,8 @@ export default function Predictivo() {
 
   return (
     <div className="space-y-4">
-      <Titulo sub={`${c.obra.nombre} · corte ${fmtFecha(c.corte)} · modelos estadísticos reproducibles (regresión, percentiles, Monte Carlo); sin IA generativa`}>Motor predictivo</Titulo>
+      <Titulo sub={`${c.obra.nombre} · corte ${fmtFecha(c.corte)} · modelos estadísticos reproducibles (regresión, percentiles, Monte Carlo); sin IA generativa`}
+        accion={<GuiaFigura figura="montecarlo" titulo="Cómo se lee el Monte Carlo del plazo" texto="Cada bolita es una corrida del programa con duraciones al azar (sesgadas por el SPI) y lluvia. Las pilas forman la distribución de la fecha de término; P50 y P80 se leen en la regla." />}>Motor predictivo</Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi etiqueta="Costo a término (EAC)" valor={mm(c.eac)} sub={`por partida · rango de métodos ${mm(eac.minimo ?? 0)} – ${mm(eac.maximo ?? 0)}`} estado={c.eac <= c.bac ? 'verde' : c.eac <= c.bac * 1.03 ? 'amarillo' : 'rojo'} />
         <Kpi etiqueta="Término determinista (CPM)" valor={fmtFecha(c.terminoProyectado - 1)} sub={`+${num(lluvia, 1)} días esperados de lluvia → ${fmtFecha(Math.round(c.terminoProyectado + lluvia) - 1)}`} />
