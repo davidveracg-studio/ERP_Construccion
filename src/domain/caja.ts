@@ -51,7 +51,12 @@ export interface SemanaCaja {
   saldo: number
   /** La semana terminó antes del corte (todo real). */
   real: boolean
+  /** Retenciones de EP acumuladas (retenidas por el mandante y aún no devueltas) al final de la semana. */
+  retenido: number
 }
+
+/** Retención de un EP (monto > 0, en su corte) o devolución de retenciones (monto < 0). */
+export interface MovRetencion { fecha: Dia; monto: number }
 
 export interface ResumenCaja {
   condiciones: CondicionesPago
@@ -75,6 +80,7 @@ export interface ResumenCaja {
   porPagar30: number
   /** KFI-04: avance valorizado validado no cubierto por EP aprobados. */
   avanceNoCobrado: number
+  retenciones: MovRetencion[]
   semanas: SemanaCaja[]
 }
 
@@ -140,6 +146,7 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
   const valIncluido = eps.filter((e) => e.tipo === 'avance').reduce((s, e) => s + e.bruto, 0)
   let porAmortizar = anticipoPorAmortizar(eps, T)
   let retenido = eps.reduce((s, e) => s + e.retencion, 0)
+  const retenciones: MovRetencion[] = eps.filter((e) => e.retencion > 0).map((e) => ({ fecha: e.fechaCorte, monto: e.retencion }))
   let previo = valIncluido
   let numero = (eps.at(-1)?.numero ?? 0) + 1
   // Parte en el primer corte pendiente: el EP del mes recién cerrado puede no estar presentado aún
@@ -152,11 +159,13 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
     const m = montosEP(bruto, cond, porAmortizar)
     porAmortizar -= m.amortizacion
     retenido += m.retencion
+    if (m.retencion > 0) retenciones.push({ fecha: corte, monto: m.retencion })
     add(Math.max(corte + DIAS_PREPARACION_EP + cond.diasAprobacion + 1 + cond.diasPago, T + 7), m.neto, 'cobro_ep', `EP N° ${numero++} (estimado)`, 'estimado')
     previo = valor
   }
   // Las retenciones se devuelven tras la recepción provisoria (o el término proyectado si aún no hay)
   const recepcion = recepcionProvisoria(d.recepciones, obra.id, T)
+  if (retenido > 0) retenciones.push({ fecha: Math.max((recepcion?.fecha ?? finProy) + cond.diasDevolucionRetencion, T + 7), monto: -retenido })
   if (retenido > 0)
     add(Math.max((recepcion?.fecha ?? finProy) + cond.diasDevolucionRetencion, T + 7), retenido, 'retencion',
       recepcion ? 'Devolución de retenciones (recepción provisoria)' : 'Devolución de retenciones al término', recepcion ? 'comprometido' : 'estimado')
@@ -230,13 +239,13 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
 
   return {
     condiciones: cond, movimientos: movs, capital, saldoHoy, disponibleHoy, minimo60, fechaMinimo60, colchon, estado,
-    cxc, cxcVencida, epVencidos, porPagar30, avanceNoCobrado: Math.max(0, valReal - aprobado),
-    semanas: semanasDe(movs, obra.fechaInicio, T, capital),
+    cxc, cxcVencida, epVencidos, porPagar30, avanceNoCobrado: Math.max(0, valReal - aprobado), retenciones,
+    semanas: semanasDe(movs, obra.fechaInicio, T, capital, retenciones),
   }
 }
 
 /** Movimientos agrupados por semana (lunes), desde el inicio de la obra hasta el último movimiento. */
-export function semanasDe(movs: Movimiento[], inicio: Dia, corte: Dia, capital = 0): SemanaCaja[] {
+export function semanasDe(movs: Movimiento[], inicio: Dia, corte: Dia, capital = 0, retenciones: MovRetencion[] = []): SemanaCaja[] {
   if (movs.length === 0) return []
   const lunes = (t: Dia) => t - ((new Date(t * 86_400_000).getUTCDay() + 6) % 7)
   const desde = lunes(Math.min(inicio, movs[0].fecha))
@@ -253,7 +262,8 @@ export function semanasDe(movs: Movimiento[], inicio: Dia, corte: Dia, capital =
       i++
     }
     saldo += ingresos - egresos
-    out.push({ desde: s, ingresos, egresos, saldo, real: s + 6 <= corte })
+    const retenido = retenciones.reduce((a, r) => a + (r.fecha < s + 7 ? r.monto : 0), 0)
+    out.push({ desde: s, ingresos, egresos, saldo, real: s + 6 <= corte, retenido: Math.max(0, retenido) })
   }
   return out
 }
@@ -282,6 +292,7 @@ export function consolidarCaja(cajas: ResumenCaja[], corte: Dia): Omit<ResumenCa
     epVencidos: cajas.flatMap((c) => c.epVencidos),
     porPagar30: cajas.reduce((s, c) => s + c.porPagar30, 0),
     avanceNoCobrado: cajas.reduce((s, c) => s + c.avanceNoCobrado, 0),
-    semanas: semanasDe(movimientos, inicio, corte, capital),
+    retenciones: cajas.flatMap((c) => c.retenciones),
+    semanas: semanasDe(movimientos, inicio, corte, capital, cajas.flatMap((c) => c.retenciones)),
   }
 }
