@@ -365,3 +365,65 @@ export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; 
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Health Score: desglose como tubos comunicantes (ancho = peso, alto = puntaje)
+// ---------------------------------------------------------------------------
+export function HealthDesglose({ dimensiones, score, sinTope, tope }: {
+  dimensiones: { id: string; nombre: string; peso: number; valor: number | null }[]
+  score: number | null
+  sinTope: number | null
+  tope: boolean
+}) {
+  const W = 720, H = 230, m = { l: 40, r: 120, t: 18, b: 44 }
+  const anim = useProgreso<HTMLDivElement>(2400, dimensiones.map((d) => d.valor).join())
+  const sube = suave(Math.min(1, anim.p / 0.55))
+  const nivel = suave(Math.max(0, (anim.p - 0.6) / 0.4))
+  const pesoTotal = dimensiones.reduce((s, d) => s + d.peso, 0)
+  const gap = 10
+  const ancho = W - m.l - m.r - gap * (dimensiones.length - 1)
+  const y = (v: number) => H - m.b - (v / 100) * (H - m.t - m.b)
+  const tono = (v: number) => (v >= 80 ? '#10b981' : v >= 60 ? '#f59e0b' : '#ef4444')
+  let x = m.l
+  const cols = dimensiones.map((d) => { const w = (d.peso / pesoTotal) * ancho; const c = { ...d, x, w }; x += w + gap; return c })
+  const altura = (v: number) => v * sube
+  return (
+    <div ref={anim.ref}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img"
+        aria-label={`Health Score ${score != null ? Math.round(score) : 'sin datos'}: ${dimensiones.map((d) => `${d.nombre} ${d.valor != null ? Math.round(d.valor) : 'sin datos'} (peso ${Math.round(d.peso * 100)} %)`).join(', ')}`}>
+        {[0, 60, 80, 100].map((v) => (
+          <g key={v}>
+            <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke={v === 60 || v === 80 ? '#cbd5e1' : C.grid} strokeDasharray={v === 60 || v === 80 ? '3 3' : undefined} />
+            <text x={m.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill={C.texto}>{v}</text>
+          </g>
+        ))}
+        {cols.map((c) => (
+          <g key={c.id}>
+            <rect x={c.x} y={y(100)} width={c.w} height={y(0) - y(100)} fill="none" stroke="#e2e8f0" />
+            {c.valor != null
+              ? <rect x={c.x + 1} y={y(altura(c.valor))} width={c.w - 2} height={y(0) - y(altura(c.valor))} fill={tono(c.valor)} opacity={0.85} />
+              : <text x={c.x + c.w / 2} y={y(50)} textAnchor="middle" fontSize="10" fill={C.eje}>sin datos</text>}
+            {c.valor != null && <text x={c.x + c.w / 2} y={y(altura(c.valor)) - 4} textAnchor="middle" fontSize="11" fontWeight="600" fill={C.texto} opacity={sube}>{Math.round(c.valor)}</text>}
+            <text x={c.x + c.w / 2} y={H - m.b + 15} textAnchor="middle" fontSize="11" fill={C.texto}>{c.w < 46 ? c.nombre.slice(0, 5) + '.' : c.nombre}</text>
+            <text x={c.x + c.w / 2} y={H - m.b + 29} textAnchor="middle" fontSize="10" fill={C.eje}>{Math.round(c.peso * 100)} %</text>
+          </g>
+        ))}
+        {sinTope != null && nivel > 0 && (
+          <g opacity={nivel}>
+            <line x1={m.l} x2={m.l + (W - m.r - m.l) * nivel} y1={y(sinTope)} y2={y(sinTope)} stroke="#1e293b" strokeWidth={2} />
+            <text x={W - m.r + 8} y={y(sinTope) + 4} fontSize="12" fontWeight="700" fill="#1e293b">{tope ? `${Math.round(sinTope)} →` : `Score ${Math.round(sinTope)}`}</text>
+            <text x={W - m.r + 8} y={y(sinTope) + 18} fontSize="10" fill={C.texto}>promedio ponderado</text>
+          </g>
+        )}
+        {tope && score != null && nivel > 0 && (
+          <g opacity={nivel}>
+            <line x1={m.l} x2={W - m.r} y1={y(59)} y2={y(59)} stroke="#dc2626" strokeWidth={2} />
+            <text x={W - m.r + 8} y={y(59) + 4} fontSize="12" fontWeight="700" fill="#dc2626">Tope 59</text>
+            <text x={W - m.r + 8} y={y(59) + 18} fontSize="10" fill="#dc2626">accidente grave</text>
+          </g>
+        )}
+      </svg>
+      <p className="mt-1 text-xs text-slate-500">Cada columna es una dimensión del semáforo; su ancho es su peso. El score es el promedio ponderado (la línea negra){tope ? ' y este mes queda topado en 59 por un accidente grave' : ''}. Las dimensiones sin datos se omiten y su peso se reparte.</p>
+    </div>
+  )
+}

@@ -2,14 +2,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertaCard } from '../components/AlertaCard'
-import { BarrasAvance, CurvaS } from '../components/graficos'
+import { BarrasAvance, HealthDesglose, CurvaS } from '../components/graficos'
 import { SemaforoEjecutivo } from '../components/Semaforo'
 import { Badge, Card, Kpi, Titulo, cx } from '../components/ui'
 import GuiaFigura from '../components/GuiaFigura'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { idx, mm, pct, pp } from '../domain/formato'
-import { healthScore } from '../domain/semaforo'
+import { healthDetalle } from '../domain/semaforo'
 import { useCalc } from '../store/hooks'
 
 const ESTADO_HITO = {
@@ -24,7 +24,8 @@ export default function ObraTower() {
   if (!c) return null
   const o = c.obra
   const u = d.config.umbrales
-  const score = healthScore(c, d.config)
+  const health = healthDetalle(c, d.config)
+  const score = health.score
   const alertas = d.alertas
     .filter((a) => a.obraId === o.id && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
     .sort((a, b) => ['critica', 'alta', 'media', 'baja'].indexOf(a.severidad) - ['critica', 'alta', 'media', 'baja'].indexOf(b.severidad))
@@ -33,7 +34,7 @@ export default function ObraTower() {
   return (
     <div className="space-y-5">
       <Titulo sub={`${o.mandante} · Administrador: ${o.administrador} · inicio ${fmtFecha(o.fechaInicio)} · plazo ${o.plazoDias} días`}
-        accion={<><GuiaFigura figura="health-score" titulo="Cómo se calcula el Health Score" texto="Siete tubos comunicantes, uno por dimensión y con el ancho de su peso. Al abrir la válvula el agua se nivela en el promedio ponderado; un accidente grave baja el tope a 59." /><Link to="/informe" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Informe semanal</Link><Link to="/cierre" className="rounded-lg bg-marca px-3 py-2 text-sm text-white">Cerrar semana</Link></>}>
+        accion={<><Link to="/informe" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Informe semanal</Link><Link to="/cierre" className="rounded-lg bg-marca px-3 py-2 text-sm text-white">Cerrar semana</Link></>}>
         {o.nombre} {score != null && <span className="ml-2 align-middle"><Badge tono={score >= 80 ? 'verde' : score >= 60 ? 'ambar' : 'rojo'}>Health Score {Math.round(score)}</Badge></span>}
       </Titulo>
 
@@ -45,6 +46,12 @@ export default function ObraTower() {
           </p>
         )}
       </Card>
+
+      {score != null && (
+        <Card titulo="Health Score · cómo se compone" accion={<GuiaFigura compacto figura="health-score" titulo="Cómo se calcula el Health Score" texto="Siete tubos comunicantes, uno por dimensión y con el ancho de su peso. Al abrir la válvula el agua se nivela en el promedio ponderado; un accidente grave baja el tope a 59." />}>
+          <HealthDesglose {...health} />
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Card titulo="Avance de obra">

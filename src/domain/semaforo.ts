@@ -64,6 +64,13 @@ export function semaforoRecord(celdas: CeldaSemaforo[]): Record<string, EstadoSe
 
 /** Health Score de obra (14 §5.1) con renormalización sobre dimensiones disponibles. */
 export function healthScore(c: CalcObra, cfg: Config): number | null {
+  return healthDetalle(c, cfg).score
+}
+
+export interface DimensionHealth { id: string; nombre: string; peso: number; valor: number | null }
+
+/** Desglose del Health Score: puntaje 0–100 de cada dimensión, su peso y el tope por accidente grave. */
+export function healthDetalle(c: CalcObra, cfg: Config): { dimensiones: DimensionHealth[]; sinTope: number | null; score: number | null; tope: boolean } {
   const u = cfg.umbrales
   // normaliza: crítico → 0, alerta → 60, objetivo → 100
   const norm = (v: number | null, obj: number, alerta: number, crit: number) => {
@@ -91,9 +98,16 @@ export function healthScore(c: CalcObra, cfg: Config): number | null {
     // Calidad (14 §5.1: 5 %): rework rate (KCA-07) y NCR abiertas (KCA-02)
     [c.calidad.estado !== 'na' ? avg([[norm(c.calidad.reworkRate, 0.02, 0.03, 0.06), 0.5], [norm(c.calidad.ncrAbiertas, 3, 5, 10), 0.5]]) : null, 0.05],
   ]
-  const score = avg(comps)
+  const sinTope = avg(comps)
   // Regla de tope: un accidente grave o fatal en el mes limita el score a 59 ("Riesgo")
-  return score != null && c.seguridad.graveMes ? Math.min(score, 59) : score
+  const tope = sinTope != null && !!c.seguridad.graveMes
+  const nombres: [string, string][] = [['costo', 'Costo'], ['plazo', 'Plazo'], ['avance', 'Avance'], ['productividad', 'Productividad'], ['caja', 'Caja'], ['seguridad', 'Seguridad'], ['calidad', 'Calidad']]
+  return {
+    dimensiones: comps.map(([valor, peso], i) => ({ id: nombres[i][0], nombre: nombres[i][1], peso, valor })),
+    sinTope,
+    score: tope ? Math.min(sinTope!, 59) : sinTope,
+    tope,
+  }
 }
 
 function avg(xs: [number | null, number][]): number | null {
