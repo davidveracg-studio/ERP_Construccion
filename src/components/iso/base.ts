@@ -105,3 +105,31 @@ export const liquido = (P: Projection, x: number, y: number, r: number, base: nu
   h < 0.3 ? '' : k.solidSvg(k.cylinder(x, y, r - 0.6, base, h, P, 44), { tone: lit ? 'hi' : 'mid', lit, crease: 'lo' })
 
 export const anillo = (P: Projection, x: number, y: number, r: number, z: number) => k.sideArc(x, y, r, z, P, 40)
+
+/** Paleta de los gráficos de la app (graficos.tsx) y de estados. */
+export const COLOR = {
+  pv: '#1baf7a', ev: '#2a78d6', ac: '#eb6834',
+  cobro: '#1baf7a', pago: '#eb6834', caja: '#2a78d6', retencion: '#8b5cf6', colchon: '#d97706',
+  verde: '#10b981', ambar: '#f59e0b', rojo: '#ef4444', contrato: '#dc2626',
+} as const
+
+/** Color de estado por puntaje 0–100 (≥ 80 verde, ≥ 60 ámbar, si no rojo). */
+export const colorEstado = (v: number) => (v >= 80 ? COLOR.verde : v >= 60 ? COLOR.ambar : COLOR.rojo)
+
+/**
+ * Tiñe un trozo de SVG del kit: redefine las variables de tono para que relleno, cara superior,
+ * las cuatro sombras y los bordes salgan del color, conservando el sombreado por orientación.
+ * `palido` (0–1) aclara todo (p. ej. para lo proyectado).
+ */
+export function tinte(svg: string, color: string, palido = 0) {
+  if (!svg) return ''
+  const blanco = (p: number) => `color-mix(in srgb, ${color} ${Math.round(p * (1 - palido * 0.55))}%, white)`
+  const negro = (p: number) => `color-mix(in srgb, ${color} ${p}%, black)`
+  const vars = [
+    `--anatomy-paper:${blanco(62)}`, `--anatomy-face:${blanco(62)}`, `--anatomy-top:${blanco(42)}`, `--anatomy-lit-top:${blanco(42)}`,
+    `--anatomy-shade-0:${palido ? blanco(95) : negro(82)}`, `--anatomy-shade-1:${blanco(95)}`, `--anatomy-shade-2:${blanco(82)}`, `--anatomy-shade-3:${blanco(70)}`,
+    `--anatomy-hi:${negro(70)}`, `--anatomy-mid:${negro(85)}`, `--anatomy-lo:${blanco(55)}`, `--anatomy-faint:${blanco(35)}`,
+    `--anatomy-lit:${negro(90)}`, `--anatomy-dot:${negro(80)}`,
+  ].join(';')
+  return `<g style="${vars}">${svg}</g>`
+}

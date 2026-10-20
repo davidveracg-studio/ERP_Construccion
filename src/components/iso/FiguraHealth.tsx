@@ -4,17 +4,15 @@
 // baja al tope 59 si hubo accidente grave. Al señalar un tubo la válvula se cierra y se ve su nivel.
 import { useMemo, useState } from 'react'
 import type { DimensionHealth } from '../../domain/semaforo'
-import { cx } from '../ui'
-import { atajos, banco, k } from './base'
+import { atajos, banco, COLOR, colorEstado, k, tinte } from './base'
 import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 
-const W = 640, H = 380
+const W = 640, H = 430
 const ESC = 0.8, FONDO = 16, GAP = 4, Y0 = -8, Z0 = 7, ALTO = 100 * ESC + 6
 const PLATE = { x: -122, y: -34, w: 248, d: 72, r: 8 }
-const P = k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-96, Y0, Z0 + ALTO], [96, Y0, Z0 + ALTO + 10]], W, H, { pad: 12, azimuth: 62 })
+const P = k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-96, Y0, Z0 + ALTO + 14], [96, Y0, Z0 + ALTO + 14], [0, PLATE.y + PLATE.d, -40]], W, H, { pad: 12, azimuth: 90, elevation: 18 })
 const { S, L, D, at, seg, box } = atajos(P)
 
-const tono = (v: number) => (v >= 80 ? 'text-emerald-700' : v >= 60 ? 'text-amber-700' : 'text-red-700')
 
 export default function FiguraHealth({ dimensiones, score, sinTope, tope }: { dimensiones: DimensionHealth[]; score: number | null; sinTope: number | null; tope: boolean }) {
   const [sel, setSel] = useState<number | null>(null)
@@ -65,6 +63,12 @@ export default function FiguraHealth({ dimensiones, score, sinTope, tope }: { di
         label="Siete tubos de vidrio de distinto ancho sobre un colector con válvula, uno por dimensión del Health Score, y un tubo de lectura con flotador."
         aria="Health Score: flechas eligen un tubo; Escape abre la válvula"
         hint={u < 0.98 ? 'Válvula cerrada · cada tubo en su nivel' : 'Válvula abierta · nivel común'}
+        leyenda={[
+          { color: COLOR.verde, texto: '≥ 80 saludable' },
+          { color: COLOR.ambar, texto: '60–79 alerta' },
+          { color: COLOR.rojo, texto: '< 60 riesgo' },
+          ...(tope ? [{ color: COLOR.contrato, texto: 'Tope 59 por accidente grave' }] : []),
+        ]}
         lectura={d ? <>{d.nombre} {d.valor != null ? Math.round(d.valor) : 'sin datos'} · peso {Math.round(d.peso * 100)} %</> : <>score <b>{score != null ? Math.round(score) : '—'}</b>{tope ? ' · tope 59 por accidente grave' : ''}</>}
         onPointerMove={(e) => { const i = tuboEn(e); setSel(i >= 0 ? i : null) }}
         onPointerLeave={() => setSel(null)}
@@ -75,26 +79,41 @@ export default function FiguraHealth({ dimensiones, score, sinTope, tope }: { di
         capas={[
           estatico.colector,
           ...tubos.flatMap((t, i) => [
-            t.valor != null ? caja(t.x + 0.4, Y0 + 0.4, t.w - 0.8, FONDO - 0.8, Z0, (t.valor + (m - t.valor) * u) * ESC, i === sel) : '',
+            t.valor != null ? tinte(caja(t.x + 0.4, Y0 + 0.4, t.w - 0.8, FONDO - 0.8, Z0, (t.valor + (m - t.valor) * u) * ESC), colorEstado(t.valor), sel != null && i !== sel ? 0.55 : 0) : '',
             estatico.tuboV[i],
           ]),
-          u > 0.01 ? caja(GX + 0.4, Y0 + 5.4, 5.2, 5.2, Z0, m * ESC * u) : '',
+          u > 0.01 ? tinte(caja(GX + 0.4, Y0 + 5.4, 5.2, 5.2, Z0, m * ESC * u), colorEstado(score ?? m)) : '',
           estatico.lectura,
-          <g key="tp" transform={k.translateAlong(P, [0, 0, Z0 + (tope ? 59 : 108) * ESC + 3])} dangerouslySetInnerHTML={{ __html: estatico.tope }} />,
+          <g key="tp" style={tope ? { ['--anatomy-mid' as string]: COLOR.contrato, ['--anatomy-paper' as string]: '#fecaca', ['--anatomy-top' as string]: '#fee2e2' } : undefined} transform={k.translateAlong(P, [0, 0, Z0 + (tope ? 59 : 108) * ESC + 3])} dangerouslySetInnerHTML={{ __html: estatico.tope }} />,
           <g key="fl" transform={k.translateAlong(P, [0, 0, Z0 + lecturaV * ESC])} dangerouslySetInnerHTML={{ __html: estatico.flot }} />,
           palanca,
+          <g key="rot" fontFamily="ui-sans-serif, system-ui, sans-serif">
+            {tubos.map((t, i) => {
+              const [bx, by] = at([t.x + t.w / 2, PLATE.y + PLATE.d, -15])
+              const [tx, ty] = at([t.x + t.w / 2, Y0 + FONDO, Z0 + ALTO + 3])
+              const corto = t.w >= 20 ? t.nombre : ({ Productividad: 'Prod.', Calidad: 'Cal.', Seguridad: 'Seg.' } as Record<string, string>)[t.nombre] ?? t.nombre
+              return (
+                <g key={t.id} opacity={sel != null && sel !== i ? 0.45 : 1}>
+                  <text x={tx} y={ty} textAnchor="middle" fontSize="13" fontWeight="700" fill={t.valor != null ? colorEstado(t.valor) : '#94a3b8'}>{t.valor != null ? Math.round(t.valor) : '—'}</text>
+                  <text x={bx} y={by + 14} textAnchor="middle" fontSize="11.5" fill="#334155">{corto}</text>
+                  <text x={bx} y={by + 28} textAnchor="middle" fontSize="10.5" fill="#94a3b8">{Math.round(t.peso * 100)} %</text>
+                </g>
+              )
+            })}
+            {(() => {
+              const [gx, gy] = at([GX + 3, Y0 + 8, Z0 + ALTO + 10])
+              const [lx, ly] = at([GX + 14, PLATE.y + PLATE.d, -15])
+              return (
+                <g>
+                  <text x={gx} y={gy - 4} textAnchor="middle" fontSize="13" fontWeight="700" fill={colorEstado(score ?? 0)}>{score != null ? Math.round(score) : '—'}</text>
+                  <text x={lx} y={ly + 14} textAnchor="middle" fontSize="11.5" fontWeight="600" fill="#334155">Score</text>
+                </g>
+              )
+            })()}
+            {[60, 80].map((v) => { const [x, y] = at([GX + 12, Y0 + 10, Z0 + v * ESC]); return <text key={v} x={x + 4} y={y + 4} fontSize="10" fill="#64748b">{v}</text> })}
+          </g>,
         ]}
       />
-      <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-1 text-xs sm:grid-cols-7">
-        {tubos.map((t, i) => (
-          <button key={t.id} type="button" onMouseEnter={() => setSel(i)} onMouseLeave={() => setSel(null)} onFocus={() => setSel(i)} onBlur={() => setSel(null)}
-            className={cx('rounded px-1 py-0.5 text-left', sel === i && 'bg-slate-100')}>
-            <span className="block truncate text-slate-500">{t.nombre}</span>
-            <span className={cx('tabular font-semibold', t.valor != null ? tono(t.valor) : 'text-slate-400')}>{t.valor != null ? Math.round(t.valor) : 'sin datos'}</span>
-            <span className="tabular text-slate-400"> · {Math.round(t.peso * 100)} %</span>
-          </button>
-        ))}
-      </div>
     </div>
   )
 }
