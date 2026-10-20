@@ -10,6 +10,7 @@ import { CAPAS, ESTADOS_4D, type Estado4D, type EstadoElemento } from '../domain
 import { pct } from '../domain/formato'
 import type { Capa, Modelo4D } from '../domain/types'
 import type { GeometriaIfc } from '../ifc/extraer'
+import { construirGrua, construirObraTemporal, type ObraTemporal } from './obraTemporal'
 
 export type Modo4D = 'estado' | 'realista'
 
@@ -178,13 +179,17 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   suelo.receiveShadow = true
   scene.add(suelo)
 
+  // Bordes nítidos de los elementos IFC (el contorno de lo planificado se lee como plano)
+  const matBordeIfc = new THREE.LineBasicMaterial({ color: '#334155', transparent: true, opacity: 0.35 })
+  let temporal: ObraTemporal | null = null
+  let niveles = { base: (_p: number) => 0, alto: (_p: number) => 2.6, pisos: 1 }
+  let estadoObra = { enCurso: null as number | null, alcanzado: 0, terminada: false }
   let edificio = new THREE.Group()
   let entorno = new THREE.Group()
   scene.add(edificio, entorno)
   let visuales = new Map<string, Visual>()
   let ultimos = new Map<string, EstadoElemento>()
   const grua = new THREE.Group()
-  const pluma = new THREE.Group()
   const matGrua = new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.6 })
   scene.add(grua)
   // Detalle por tarea: elementos asignados a la actividad en edición
@@ -193,7 +198,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
   const matPeriodo = new THREE.MeshStandardMaterial({ color: COLOR_PERIODO, roughness: 0.6, emissive: '#0369a1', emissiveIntensity: 0.25 })
   const matPeriodoPar = new THREE.MeshStandardMaterial({ color: COLOR_PERIODO, roughness: 0.7 })
   let desde: Map<string, EstadoElemento> | null = null
-  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc, matAsignado, matPeriodo, matPeriodoPar])
+  const fijos = new Set<THREE.Material>([matFantasma, matGrua, matIfc, matIfcVidrio, matFantasmaIfc, matAsignado, matPeriodo, matPeriodoPar, matBordeIfc])
   let filtro: FiltroPiso = { modo: 'todos', piso: 1 }
   let seleccion: Seleccion4D | null = null
   let asignados: Set<number> | null = null
@@ -248,6 +253,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
         mesh.receiveShadow = sombras
         const el = elementos.get(id)
         mesh.userData = { clave, original, sombra: sombras && !x.transparente, nombre: el?.nombre, ifcId: id }
+        if (sombras) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 35), matBordeIfc))
         edificio.add(mesh)
         v.ifc!.push(mesh)
       }
@@ -316,22 +322,24 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       entorno.add(copa, tronco)
     }
 
-    // Grúa torre junto al edificio
-    grua.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+    // Grúa torre en celosía junto al edificio
+    for (const m of (grua.userData.materiales ?? []) as THREE.Material[]) m.dispose()
+    grua.traverse((o) => { if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) o.geometry.dispose() })
     grua.clear()
-    pluma.clear()
-    const hg = alto + 8
-    const mastil = new THREE.Mesh(new THREE.BoxGeometry(1, hg, 1), matGrua)
-    mastil.position.y = hg / 2
-    mastil.castShadow = true
-    const brazo = new THREE.Mesh(new THREE.BoxGeometry(L * 0.9, 0.6, 0.6), matGrua)
-    brazo.position.set(L * 0.3, 0, 0)
-    const contra = new THREE.Mesh(new THREE.BoxGeometry(3, 1.4, 1.4), new THREE.MeshStandardMaterial({ color: '#64748b' }))
-    contra.position.set(-L * 0.12, -0.4, 0)
-    pluma.add(brazo, contra)
-    pluma.position.y = hg
-    grua.add(mastil, pluma)
+    const gt = construirGrua(alto + 8, L * 0.9)
+    grua.add(gt.grupo)
+    grua.userData.materiales = gt.materiales
     grua.position.set(-L / 2 - 4, 0, A / 4)
+
+    // Niveles reales (IFC) o del modelo paramétrico, y obras temporales de la faena
+    const H = m.alturaPiso
+    const cotas = bim ? new Map(bim.grupos.niveles.filter((n) => n.piso >= 1).map((n) => [n.piso, n.elevacion])) : null
+    const base = (p: number) => cotas?.get(p) ?? (p - 1) * H
+    niveles = { pisos, base, alto: (p: number) => (cotas?.get(p + 1) != null ? cotas.get(p + 1)! - base(p) : H) }
+    const huella = bim ? { x0: bim.geo.min[0], x1: bim.geo.max[0], z0: bim.geo.min[2], z1: bim.geo.max[2] } : { x0: -L / 2, x1: L / 2, z0: -A / 2, z1: A / 2 }
+    temporal = construirObraTemporal(huella, niveles)
+    entorno.add(temporal.grupo)
+    entorno.userData.materiales = temporal.materiales
 
     // Cámara y sol según el tamaño del edificio
     const r = Math.max(L, A, alto) * 1.6 + 12
@@ -384,6 +392,17 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       }
     }
     grua.visible = estructuraIniciada && estructuraPendiente
+    // Piso de estructura en curso, altura alcanzada y si la obra ya terminó
+    let enCurso: number | null = null
+    let alcanzado = 0
+    let terminada = ultimos.size > 0
+    for (const e of ultimos.values()) {
+      if (e.real < 0.999) terminada = false
+      if (e.elemento.capa !== 'estructura' || e.elemento.piso < 1) continue
+      if (e.real > 0.001) alcanzado = Math.max(alcanzado, niveles.base(e.elemento.piso) + niveles.alto(e.elemento.piso))
+      if (e.real > 0.001 && e.real < 0.999) enCurso = enCurso == null ? e.elemento.piso : Math.min(enCurso, e.elemento.piso)
+    }
+    estadoObra = { enCurso, alcanzado, terminada }
     aplicarVista()
   }
 
@@ -402,6 +421,7 @@ function crearMotor(cont: HTMLDivElement, onTip: (t: { x: number; y: number; tex
       for (const mesh of v.ifc ?? []) mesh.visible = false
     }
     if (filtro.modo !== 'todos') grua.visible = false
+    temporal?.actualizar({ ...estadoObra, visible: filtro.modo === 'todos' && !asignados })
     if (marco) { marco.removeFromParent(); marco.dispose(); marco = null }
     const vSel = seleccion ? visuales.get(seleccion.clave) : undefined
     // El marco solo se dibuja si el piso del elemento está a la vista
