@@ -43,7 +43,7 @@ export default function Informe() {
         <div>Margen proyectado: <b>{pct(c.margenProyectado)}</b> (ofertado {pct(o.margenOfertado, 0)})</div>
         <div>Término proyectado: <b>{fmtFecha(c.terminoProyectado - 1)}</b> ({c.atrasoProyectado > 0 ? '+' : ''}{c.atrasoProyectado} d)</div>
       </section>
-      <Card titulo="2. Curva S"><CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} /></Card>
+      <Card titulo="2. Curva S"><CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} animar={false} /></Card>
       {c.actualizado && (
         <Card titulo="2b. Avance de la semana en el modelo 4D">
           <Comparacion4D d={d} c={c} desde={Math.max(o.fechaInicio, c.corte - 7)} hasta={c.corte} titulo="Avance de la semana" />

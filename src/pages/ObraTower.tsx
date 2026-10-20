@@ -60,10 +60,13 @@ export default function ObraTower() {
         </Card>
 
         <Card titulo="Curva S" className="lg:col-span-2"
-          accion={<div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
+          accion={<div className="flex items-center gap-2">
+            <GuiaFigura compacto figura="curva-s" titulo="Cómo se lee el valor ganado (EVM)" texto="Tres probetas: lo planificado (PV), lo ganado (EV, lo que vale lo construido) y lo gastado (AC). Mueve la semana y compara alturas: SPI = EV ÷ PV mide plazo y CPI = EV ÷ AC mide costo." />
+            <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
             {(['costo', 'avance'] as const).map((m) => (
               <button key={m} onClick={() => setModo(m)} className={cx('rounded-md px-2.5 py-1', modo === m ? 'bg-slate-800 text-white' : 'text-slate-600')}>{m === 'costo' ? 'PV / EV / AC' : 'Avance %'}</button>
             ))}
+            </div>
           </div>}>
           <CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} modo={modo} />
         </Card>

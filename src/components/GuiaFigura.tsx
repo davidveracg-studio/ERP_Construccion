@@ -4,12 +4,14 @@ import { Boton, Modal } from './ui'
 
 export type Figura = 'obra-4d' | 'curva-s' | 'ruta-critica' | 'caja' | 'health-score' | 'montecarlo' | 'last-planner'
 
-export default function GuiaFigura({ figura, titulo, texto, etiqueta = '¿Cómo se lee?' }: { figura: Figura; titulo: string; texto: string; etiqueta?: string }) {
+export default function GuiaFigura({ figura, titulo, texto, etiqueta = '¿Cómo se lee?', compacto = false }: { figura: Figura; titulo: string; texto: string; etiqueta?: string; compacto?: boolean }) {
   const [abierto, setAbierto] = useState(false)
   const url = `${import.meta.env.BASE_URL}figuras/${figura}-light.html`
   return (
     <>
-      <Boton variante="secundario" onClick={() => setAbierto(true)}>{etiqueta}</Boton>
+      {compacto
+        ? <button type="button" onClick={() => setAbierto(true)} className="rounded-md px-2 py-1 text-xs text-marca hover:bg-slate-100">{etiqueta}</button>
+        : <Boton variante="secundario" onClick={() => setAbierto(true)}>{etiqueta}</Boton>}
       <Modal abierto={abierto} titulo={titulo} onCerrar={() => setAbierto(false)} ancho="sm:max-w-4xl">
         <p className="mb-3 text-sm text-slate-600">{texto}</p>
         {abierto && <iframe title={`Figura: ${titulo}`} src={url} className="h-[70vh] w-full rounded-lg border border-slate-200" />}

@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react'
 import { Badge, Campo, Card, Kpi, Titulo, Vacio, cx, inputCls } from '../components/ui'
 import GuiaFigura from '../components/GuiaFigura'
+import { suave, useProgreso } from '../components/animacion'
 import { estadoPropuesta } from '../domain/comercial'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { mm, num, pct } from '../domain/formato'
@@ -23,8 +24,7 @@ export default function Predictivo() {
 
   return (
     <div className="space-y-4">
-      <Titulo sub={`${c.obra.nombre} · corte ${fmtFecha(c.corte)} · modelos estadísticos reproducibles (regresión, percentiles, Monte Carlo); sin IA generativa`}
-        accion={<GuiaFigura figura="montecarlo" titulo="Cómo se lee el Monte Carlo del plazo" texto="Cada bolita es una corrida del programa con duraciones al azar (sesgadas por el SPI) y lluvia. Las pilas forman la distribución de la fecha de término; P50 y P80 se leen en la regla." />}>Motor predictivo</Titulo>
+      <Titulo sub={`${c.obra.nombre} · corte ${fmtFecha(c.corte)} · modelos estadísticos reproducibles (regresión, percentiles, Monte Carlo); sin IA generativa`}>Motor predictivo</Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi etiqueta="Costo a término (EAC)" valor={mm(c.eac)} sub={`por partida · rango de métodos ${mm(eac.minimo ?? 0)} – ${mm(eac.maximo ?? 0)}`} estado={c.eac <= c.bac ? 'verde' : c.eac <= c.bac * 1.03 ? 'amarillo' : 'rojo'} />
         <Kpi etiqueta="Término determinista (CPM)" valor={fmtFecha(c.terminoProyectado - 1)} sub={`+${num(lluvia, 1)} días esperados de lluvia → ${fmtFecha(Math.round(c.terminoProyectado + lluvia) - 1)}`} />
@@ -49,7 +49,7 @@ export default function Predictivo() {
           {eac.serie.length >= 2 && <SerieCPI serie={eac.serie} tendencia={eac.tendencia} />}
         </Card>
 
-        <Card titulo="Simulación Monte Carlo del plazo">
+        <Card titulo="Simulación Monte Carlo del plazo" accion={<GuiaFigura compacto figura="montecarlo" titulo="Cómo se lee el Monte Carlo del plazo" texto="Cada bolita es una corrida del programa con duraciones al azar (sesgadas por el SPI) y lluvia. Las pilas forman la distribución de la fecha de término; P50 y P80 se leen en la regla." />}>
           {!sim ? <p className="text-sm text-slate-500">No se pudo simular.</p> : (
             <>
               <Histograma sim={sim} />
@@ -108,27 +108,70 @@ function SerieCPI({ serie, tendencia }: { serie: { fecha: number; cpi: number | 
   )
 }
 
+// Histograma animado como un tablero de Galton: cada bolita es una de las corridas de la
+// simulación; cae desde la tolva, zigzaguea y se apila en la semana en que termina la obra.
+const MS_LANZAR = 3200, MS_VUELO = 900, MS_TOTAL = MS_LANZAR + MS_VUELO + 500
+
 function Histograma({ sim }: { sim: NonNullable<ReturnType<typeof simularPlazo>> }) {
   const W = 320, H = 110
+  const T = 12
+  const { ref, p, repetir } = useProgreso<HTMLDivElement>(MS_TOTAL, sim)
   const max = Math.max(...sim.histograma.map((h) => h.n))
   const x0 = sim.histograma[0].desde
   const x1 = sim.histograma.at(-1)!.desde + (sim.histograma[1] ? sim.histograma[1].desde - x0 : 1)
   const X = (x: number) => 8 + ((x - x0) / Math.max(1, x1 - x0)) * (W - 16)
   const bw = (W - 16) / sim.histograma.length
   const paso = sim.histograma[1] ? sim.histograma[1].desde - x0 : 1
-  const T = 12
+  const alto = (n: number) => (n / max) * (H - 10)
+  // Orden de caída: las corridas de cada casillero mezcladas de forma reproducible
+  const bolitas = useMemo(() => {
+    const lista = sim.histograma.flatMap((h, b) => Array.from({ length: h.n }, () => b))
+    let s = 7
+    for (let i = lista.length - 1; i > 0; i--) { s = (s * 16807) % 2147483647; const j = s % (i + 1); [lista[i], lista[j]] = [lista[j], lista[i]] }
+    return lista
+  }, [sim])
+  const t = p * MS_TOTAL
+  const N = bolitas.length
+  const caidas = sim.histograma.map(() => 0)
+  const enVuelo: { x: number; y: number; b: number }[] = []
+  const xc = W / 2
+  bolitas.forEach((b, i) => {
+    const ts = (i / N) * MS_LANZAR
+    if (t < ts) return
+    if (t >= ts + MS_VUELO) { caidas[b]++; return }
+    enVuelo.push({ x: 0, y: 0, b: i })
+  })
+  for (const v of enVuelo) {
+    const b = bolitas[v.b]
+    const f = (t - (v.b / N) * MS_LANZAR) / MS_VUELO
+    const xb = 8 + b * bw + bw / 2
+    const lado = (v.b * 7919) % 2 ? 1 : -1
+    v.x = xc + (xb - xc) * suave(f) + Math.sin(f * Math.PI * 6) * bw * 0.22 * lado * (1 - f)
+    v.y = -T + 4 + (H - alto(caidas[b]) - 2 - (-T + 4)) * f ** 1.6
+  }
+  const final = suave((t - MS_LANZAR - MS_VUELO) / 400)
+  const color = (h: { desde: number }) => (h.desde + paso <= sim.contractual ? 'fill-emerald-400' : 'fill-amber-400')
+  const marcas: [string, number, string, number][] = [['P50', sim.p50, 'text-slate-700', -3], ['P80', sim.p80, 'text-slate-500', -3], ['Contrato', sim.contractual, 'text-crit', H + 11]]
   return (
-    <svg viewBox={`0 0 ${W} ${H + T + 14}`} className="w-full" role="img" aria-label="Distribución del término de obra">
-      <g transform={`translate(0 ${T})`}>
-        {sim.histograma.map((h, i) => <rect key={i} x={8 + i * bw + 1} y={H - (h.n / max) * (H - 10)} width={bw - 2} height={(h.n / max) * (H - 10)} className={h.desde + paso <= sim.contractual ? 'fill-emerald-400' : 'fill-amber-400'} />)}
-        {[['P50', sim.p50, 'text-slate-700', -3], ['P80', sim.p80, 'text-slate-500', -3], ['Contrato', sim.contractual, 'text-crit', H + 11]].map(([n, x, cls, y]) => (
-          <g key={n as string} className={cls as string}>
-            <line x1={X(x as number)} x2={X(x as number)} y1={0} y2={H} stroke="currentColor" strokeWidth={1.5} strokeDasharray={n === 'Contrato' ? '0' : '3 2'} />
-            <text x={X(x as number)} y={y as number} textAnchor="middle" className="fill-current text-[9px]">{n as string}</text>
-          </g>
-        ))}
-      </g>
-    </svg>
+    <div ref={ref} className="relative">
+      <svg viewBox={`0 0 ${W} ${H + T + 14}`} className="w-full" role="img" aria-label={`Distribución del término de obra: ${sim.n} simulaciones`}>
+        <g transform={`translate(0 ${T})`}>
+          <path d={`M${xc - 7} ${-T} L${xc + 7} ${-T} L${xc + 1.5} ${-T + 5} L${xc - 1.5} ${-T + 5} Z`} className="fill-slate-300" opacity={1 - final} />
+          {sim.histograma.map((h, i) => <rect key={i} x={8 + i * bw + 1} y={H - alto(caidas[i])} width={bw - 2} height={alto(caidas[i])} className={color(h)} />)}
+          {enVuelo.map((v) => <circle key={v.b} cx={v.x} cy={v.y} r={1.6} className={color(sim.histograma[bolitas[v.b]])} stroke="#334155" strokeWidth={0.4} />)}
+          {marcas.map(([n, x, cls, y]) => (
+            <g key={n} className={cls} opacity={n === 'Contrato' ? 1 : final}>
+              <line x1={X(x)} x2={X(x)} y1={0} y2={H} stroke="currentColor" strokeWidth={1.5} strokeDasharray={n === 'Contrato' ? '0' : '3 2'} />
+              <text x={X(x)} y={y} textAnchor="middle" className="fill-current text-[9px]">{n}</text>
+            </g>
+          ))}
+        </g>
+      </svg>
+      <div className="flex items-center justify-between text-xs text-slate-500">
+        <span className="tabular">{p < 1 ? `simulando… ${caidas.reduce((a, c) => a + c, 0)} de ${sim.n} corridas` : `${sim.n} corridas`}</span>
+        <button type="button" onClick={repetir} className="rounded px-2 py-0.5 text-marca hover:bg-slate-100">↻ Repetir simulación</button>
+      </div>
+    </div>
   )
 }
 

@@ -37,7 +37,6 @@ export default function Caja() {
       <Titulo sub="Caja disponible = capital de trabajo asignado + cobros − pagos. Real hasta hoy; después, lo comprometido y lo estimado según el avance proyectado. Montos netos, sin IVA."
         accion={
           <div className="flex flex-wrap items-center gap-2">
-            <GuiaFigura figura="caja" titulo="Cómo se lee la caja de la obra" texto="Un estanque que se llena con los cobros de EP (40 días después del corte) y se vacía con cada pago; el 5 % retenido espera en un estanque aparte hasta después de la recepción. El punto más bajo es el capital de trabajo que la obra necesita." />
             <div className="flex overflow-hidden rounded-lg border border-slate-300 text-sm" role="radiogroup" aria-label="Vista">
               {(['obra', 'cartera'] as const).map((v) => (
                 <button key={v} role="radio" aria-checked={vista === v} onClick={() => setVista(v)}
@@ -63,7 +62,7 @@ export default function Caja() {
         <Kpi etiqueta="Por pagar 30 días" valor={mm(k.porPagar30)} sub="proveedores, subcontratos y remuneraciones" />
       </div>
 
-      <Card titulo={`Flujo semanal · ${cartera ? 'cartera' : c.obra.nombre}`}>
+      <Card titulo={`Flujo semanal · ${cartera ? 'cartera' : c.obra.nombre}`} accion={<GuiaFigura compacto figura="caja" titulo="Cómo se lee la caja de la obra" texto="Un estanque que se llena con los cobros de EP (40 días después del corte) y se vacía con cada pago; el 5 % retenido espera en un estanque aparte hasta después de la recepción. El punto más bajo es el capital de trabajo que la obra necesita." />}>
         <FlujoCaja semanas={k.semanas} corte={corte} colchon={k.colchon} />
       </Card>
 
