@@ -2,15 +2,15 @@
 // programa (250 días); al mover el cursor de fecha la obra se levanta piso a piso:
 // sólido = ejecutado (real), contorno marcado = lo que el plan ya pedía y aún no está.
 // El reloj de la derecha lee el avance: aguja blanca = real, aguja corta = plan.
-//   node tools/figura-4d/build.mjs [--light]   → public/figuras/obra-4d(-light).html
+//   node tools/figuras/obra-4d/build.mjs [--light]   → public/figuras/obra-4d(-light).html
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as k from "./kit/iso-kit.mjs";
+import * as k from "../kit/iso-kit.mjs";
 import { ACTS, DIAS, HOY, PISOS, estadoEn } from "./model.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT = join(HERE, "..", "..", "public", "figuras");
+const OUT = join(HERE, "..", "..", "..", "public", "figuras");
 const theme = process.argv.includes("--light") ? "light" : "dark";
 const strip = (file) => readFileSync(join(HERE, file), "utf8").replace(/^export /gm, "");
 
@@ -578,6 +578,6 @@ const body =
 
 mkdirSync(OUT, { recursive: true });
 const name = theme === "light" ? "obra-4d-light.html" : "obra-4d.html";
-const html = k.pageHtml({ title: "Obra en el tiempo", theme, body, script: strip("kit/iso-kit.mjs") + live, width: 780 }).replace('<html lang="en">', '<html lang="es">');
+const html = k.pageHtml({ title: "Obra en el tiempo", theme, body, script: strip("../kit/iso-kit.mjs") + live, width: 780 }).replace('<html lang="en">', '<html lang="es">');
 writeFileSync(join(OUT, name), html);
 console.log("wrote", join(OUT, name), Math.round(html.length / 1024) + " KB", "· actividades", ACTS.length);

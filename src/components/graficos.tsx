@@ -1,6 +1,7 @@
 // Gráficos SVG propios (18 §4). Colores de serie validados: EV azul, AC naranja,
 // PV aqua (discontinua) con etiquetas directas; estados usan la paleta de estado.
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { suave, useProgreso } from './animacion'
 import type { SemanaCaja } from '../domain/caja'
 import type { PuntoSerie } from '../domain/evm'
 import { fmtFecha, fmtFechaCorta } from '../domain/fechas'
@@ -12,15 +13,20 @@ const C = { pv: '#1baf7a', ev: '#2a78d6', ac: '#eb6834', grid: '#e2e8f0', texto:
 // ---------------------------------------------------------------------------
 // Curva S
 // ---------------------------------------------------------------------------
-export function CurvaS({ puntos, corte, eac, terminoProyectado, modo = 'costo' }: {
+export function CurvaS({ puntos, corte, eac, terminoProyectado, modo = 'costo', animar = true }: {
   puntos: PuntoSerie[]
   corte: Dia
   eac?: number
   terminoProyectado?: Dia
   modo?: 'costo' | 'avance'
+  /** Dibuja las curvas en el tiempo al aparecer (no en informes impresos). */
+  animar?: boolean
 }) {
   const W = 720, H = 280, m = { l: 64, r: 88, t: 16, b: 28 }
   const [hover, setHover] = useState<number | null>(null)
+  const clip = useId()
+  const anim = useProgreso<HTMLDivElement>(2200, `${puntos.length}-${modo}`)
+  const avance = animar ? suave(anim.p) : 1
   const f0 = puntos[0]?.fecha ?? 0
   const f1 = Math.max(puntos.at(-1)?.fecha ?? 1, terminoProyectado ?? 0)
   const val = (p: PuntoSerie, k: 'pv' | 'ev' | 'ac') =>
@@ -46,7 +52,7 @@ export function CurvaS({ puntos, corte, eac, terminoProyectado, modo = 'costo' }
   const nombre = { pv: modo === 'costo' ? 'PV planificado' : 'Planificado', ev: modo === 'costo' ? 'EV ganado' : 'Real', ac: 'AC real' }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={anim.ref}>
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Curva S"
         onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => {
@@ -71,20 +77,24 @@ export function CurvaS({ puntos, corte, eac, terminoProyectado, modo = 'costo' }
             <text x={x(corte) + 4} y={m.t + 10} fontSize="11" fill={C.texto}>hoy</text>
           </g>
         )}
+        <defs><clipPath id={clip}><rect x={0} y={0} width={m.l + avance * (W - m.l - m.r) + 2} height={H} /></clipPath></defs>
+        <g clipPath={avance < 1 ? `url(#${clip})` : undefined}>
         {modo === 'costo' && eac != null && terminoProyectado != null && ultimo('ac') && (
           <path d={`M${x(ultimo('ac')!.fecha)},${y(ultimo('ac')!.ac!)} L${x(terminoProyectado)},${y(eac)}`} stroke={C.ac} strokeWidth="2" strokeDasharray="2 4" fill="none" />
         )}
         <path d={linea('pv')} stroke={C.pv} strokeWidth="2" strokeDasharray="6 4" fill="none" />
         <path d={linea('ev')} stroke={C.ev} strokeWidth="2" fill="none" />
         {modo === 'costo' && <path d={linea('ac')} stroke={C.ac} strokeWidth="2" fill="none" />}
+        </g>
+        {avance < 1 && <line x1={m.l + avance * (W - m.l - m.r)} x2={m.l + avance * (W - m.l - m.r)} y1={m.t} y2={H - m.b} stroke={C.eje} strokeWidth="1" />}
         {etiquetas.map((e) => (
-          <g key={e.k}>
+          <g key={e.k} opacity={avance < 1 ? 0 : 1}>
             <circle cx={x(e.p!.fecha)} cy={y(val(e.p!, e.k)!)} r="4" fill={C[e.k]} stroke="white" strokeWidth="2" />
             <text x={Math.min(W - m.r + 6, x(e.p!.fecha) + 8)} y={e.yy + 4} fontSize="11" fill={C.texto}>{nombre[e.k]}</text>
           </g>
         ))}
         {modo === 'costo' && eac != null && terminoProyectado != null && (
-          <text x={Math.min(x(terminoProyectado) + 6, W - m.r + 6)} y={(eacLbl?.yy ?? y(eac)) + 4} fontSize="11" fill={C.texto}>EAC {mm(eac)}</text>
+          <text opacity={avance < 1 ? 0 : 1} x={Math.min(x(terminoProyectado) + 6, W - m.r + 6)} y={(eacLbl?.yy ?? y(eac)) + 4} fontSize="11" fill={C.texto}>EAC {mm(eac)}</text>
         )}
         {hp && <line x1={x(hp.fecha)} x2={x(hp.fecha)} y1={m.t} y2={H - m.b} stroke={C.texto} strokeWidth="1" />}
       </svg>
@@ -267,7 +277,13 @@ export function BarrasRendimiento({ items }: { items: { etiqueta: string; real: 
 export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; corte: Dia; colchon: number }) {
   const W = 720, H = 300, m = { l: 64, r: 16, t: 16, b: 28 }
   const [hover, setHover] = useState<number | null>(null)
+  const clip = useId()
+  // Entrada: las semanas se llenan una tras otra y la caja avanza como un nivel de agua
+  const anim = useProgreso<HTMLDivElement>(2600, semanas.length)
   if (semanas.length === 0) return null
+  const frente = anim.p * semanas.length
+  const crece = (i: number) => suave(Math.min(1, Math.max(0, (frente - i) / 1.5)))
+  const iFrente = Math.min(semanas.length - 1, Math.floor(frente))
   const max = Math.max(colchon, ...semanas.map((s) => Math.max(s.ingresos, s.saldo))) * 1.08
   const min = Math.min(0, ...semanas.map((s) => Math.min(-s.egresos, s.saldo))) * 1.08
   const ancho = (W - m.l - m.r) / semanas.length
@@ -282,7 +298,7 @@ export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; 
   const h = hover != null ? semanas[hover] : null
 
   return (
-    <div className="relative">
+    <div className="relative" ref={anim.ref}>
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Flujo de caja semanal"
         onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => {
@@ -300,8 +316,8 @@ export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; 
           const op = s.real ? 1 : 0.45
           return (
             <g key={s.desde} opacity={hover == null || hover === i ? op : op * 0.6}>
-              {s.ingresos > 0 && <rect x={x(i) + 1} y={y(s.ingresos)} width={Math.max(1, ancho - 2)} height={y(0) - y(s.ingresos)} fill={C.pv} />}
-              {s.egresos > 0 && <rect x={x(i) + 1} y={y(0)} width={Math.max(1, ancho - 2)} height={y(-s.egresos) - y(0)} fill={C.ac} />}
+              {s.ingresos > 0 && <rect x={x(i) + 1} y={y(s.ingresos * crece(i))} width={Math.max(1, ancho - 2)} height={y(0) - y(s.ingresos * crece(i))} fill={C.pv} />}
+              {s.egresos > 0 && <rect x={x(i) + 1} y={y(0)} width={Math.max(1, ancho - 2)} height={y(-s.egresos * crece(i)) - y(0)} fill={C.ac} />}
             </g>
           )
         })}
@@ -312,8 +328,17 @@ export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; 
             <text x={W - m.r} y={y(colchon) - 4} textAnchor="end" fontSize="10" fill="#b45309">colchón</text>
           </g>
         )}
-        <path d={linea(real, 0)} fill="none" stroke={C.ev} strokeWidth={2.2} />
-        <path d={linea(proy, Math.max(0, iHoy))} fill="none" stroke={C.ev} strokeWidth={2} strokeDasharray="5 4" />
+        <defs><clipPath id={clip}><rect x={0} y={0} width={x(0) + frente * ancho + 1} height={H} /></clipPath></defs>
+        <g clipPath={anim.p < 1 ? `url(#${clip})` : undefined}>
+          <path d={linea(real, 0)} fill="none" stroke={C.ev} strokeWidth={2.2} />
+          <path d={linea(proy, Math.max(0, iHoy))} fill="none" stroke={C.ev} strokeWidth={2} strokeDasharray="5 4" />
+        </g>
+        {anim.p < 1 && (
+          <g>
+            <circle cx={x(iFrente) + ancho / 2} cy={y(semanas[iFrente].saldo)} r={4.5} fill={C.ev} stroke="white" strokeWidth={2} />
+            <text x={Math.min(W - m.r - 4, x(iFrente) + ancho / 2 + 8)} y={y(semanas[iFrente].saldo) - 8} textAnchor={x(iFrente) > W - 160 ? 'end' : 'start'} fontSize="11" fontWeight="600" fill={semanas[iFrente].saldo < colchon ? '#b45309' : C.texto}>{mm(semanas[iFrente].saldo)}</text>
+          </g>
+        )}
         {iHoy >= 0 && (
           <g>
             <line x1={x(iHoy) + ancho} x2={x(iHoy) + ancho} y1={m.t} y2={H - m.b} stroke={C.eje} strokeDasharray="2 3" />
@@ -337,6 +362,68 @@ export function FlujoCaja({ semanas, corte, colchon }: { semanas: SemanaCaja[]; 
         <span className="flex items-center gap-1.5"><span className="h-0.5 w-4" style={{ background: C.ev }} />Caja disponible</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-slate-300 opacity-60" />Más claro = proyectado</span>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Health Score: desglose como tubos comunicantes (ancho = peso, alto = puntaje)
+// ---------------------------------------------------------------------------
+export function HealthDesglose({ dimensiones, score, sinTope, tope }: {
+  dimensiones: { id: string; nombre: string; peso: number; valor: number | null }[]
+  score: number | null
+  sinTope: number | null
+  tope: boolean
+}) {
+  const W = 720, H = 230, m = { l: 40, r: 120, t: 18, b: 44 }
+  const anim = useProgreso<HTMLDivElement>(2400, dimensiones.map((d) => d.valor).join())
+  const sube = suave(Math.min(1, anim.p / 0.55))
+  const nivel = suave(Math.max(0, (anim.p - 0.6) / 0.4))
+  const pesoTotal = dimensiones.reduce((s, d) => s + d.peso, 0)
+  const gap = 10
+  const ancho = W - m.l - m.r - gap * (dimensiones.length - 1)
+  const y = (v: number) => H - m.b - (v / 100) * (H - m.t - m.b)
+  const tono = (v: number) => (v >= 80 ? '#10b981' : v >= 60 ? '#f59e0b' : '#ef4444')
+  let x = m.l
+  const cols = dimensiones.map((d) => { const w = (d.peso / pesoTotal) * ancho; const c = { ...d, x, w }; x += w + gap; return c })
+  const altura = (v: number) => v * sube
+  return (
+    <div ref={anim.ref}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img"
+        aria-label={`Health Score ${score != null ? Math.round(score) : 'sin datos'}: ${dimensiones.map((d) => `${d.nombre} ${d.valor != null ? Math.round(d.valor) : 'sin datos'} (peso ${Math.round(d.peso * 100)} %)`).join(', ')}`}>
+        {[0, 60, 80, 100].map((v) => (
+          <g key={v}>
+            <line x1={m.l} x2={W - m.r} y1={y(v)} y2={y(v)} stroke={v === 60 || v === 80 ? '#cbd5e1' : C.grid} strokeDasharray={v === 60 || v === 80 ? '3 3' : undefined} />
+            <text x={m.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill={C.texto}>{v}</text>
+          </g>
+        ))}
+        {cols.map((c) => (
+          <g key={c.id}>
+            <rect x={c.x} y={y(100)} width={c.w} height={y(0) - y(100)} fill="none" stroke="#e2e8f0" />
+            {c.valor != null
+              ? <rect x={c.x + 1} y={y(altura(c.valor))} width={c.w - 2} height={y(0) - y(altura(c.valor))} fill={tono(c.valor)} opacity={0.85} />
+              : <text x={c.x + c.w / 2} y={y(50)} textAnchor="middle" fontSize="10" fill={C.eje}>sin datos</text>}
+            {c.valor != null && <text x={c.x + c.w / 2} y={y(altura(c.valor)) - 4} textAnchor="middle" fontSize="11" fontWeight="600" fill={C.texto} opacity={sube}>{Math.round(c.valor)}</text>}
+            <text x={c.x + c.w / 2} y={H - m.b + 15} textAnchor="middle" fontSize="11" fill={C.texto}>{c.w < 46 ? c.nombre.slice(0, 5) + '.' : c.nombre}</text>
+            <text x={c.x + c.w / 2} y={H - m.b + 29} textAnchor="middle" fontSize="10" fill={C.eje}>{Math.round(c.peso * 100)} %</text>
+          </g>
+        ))}
+        {sinTope != null && nivel > 0 && (
+          <g opacity={nivel}>
+            <line x1={m.l} x2={m.l + (W - m.r - m.l) * nivel} y1={y(sinTope)} y2={y(sinTope)} stroke="#1e293b" strokeWidth={2} />
+            <text x={W - m.r + 8} y={y(sinTope) + 4} fontSize="12" fontWeight="700" fill="#1e293b">{tope ? `${Math.round(sinTope)} →` : `Score ${Math.round(sinTope)}`}</text>
+            <text x={W - m.r + 8} y={y(sinTope) + 18} fontSize="10" fill={C.texto}>promedio ponderado</text>
+          </g>
+        )}
+        {tope && score != null && nivel > 0 && (
+          <g opacity={nivel}>
+            <line x1={m.l} x2={W - m.r} y1={y(59)} y2={y(59)} stroke="#dc2626" strokeWidth={2} />
+            <text x={W - m.r + 8} y={y(59) + 4} fontSize="12" fontWeight="700" fill="#dc2626">Tope 59</text>
+            <text x={W - m.r + 8} y={y(59) + 18} fontSize="10" fill="#dc2626">accidente grave</text>
+          </g>
+        )}
+      </svg>
+      <p className="mt-1 text-xs text-slate-500">Cada columna es una dimensión del semáforo; su ancho es su peso. El score es el promedio ponderado (la línea negra){tope ? ' y este mes queda topado en 59 por un accidente grave' : ''}. Las dimensiones sin datos se omiten y su peso se reparte.</p>
     </div>
   )
 }

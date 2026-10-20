@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { FlujoCaja } from '../components/graficos'
 import { Boton, Campo, Card, Kpi, Modal, Titulo, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { EtapaBadge } from './EstadosPago'
 import { condicionesDe, consolidarCaja, TIPOS_MOVIMIENTO, type Movimiento } from '../domain/caja'
 import { etapaEP } from '../domain/estadosPago'
@@ -61,7 +62,7 @@ export default function Caja() {
         <Kpi etiqueta="Por pagar 30 días" valor={mm(k.porPagar30)} sub="proveedores, subcontratos y remuneraciones" />
       </div>
 
-      <Card titulo={`Flujo semanal · ${cartera ? 'cartera' : c.obra.nombre}`}>
+      <Card titulo={`Flujo semanal · ${cartera ? 'cartera' : c.obra.nombre}`} accion={<GuiaFigura compacto figura="caja" titulo="Cómo se lee la caja de la obra" texto="Un estanque que se llena con los cobros de EP (40 días después del corte) y se vacía con cada pago; el 5 % retenido espera en un estanque aparte hasta después de la recepción. El punto más bajo es el capital de trabajo que la obra necesita." />}>
         <FlujoCaja semanas={k.semanas} corte={corte} colchon={k.colchon} />
       </Card>
 

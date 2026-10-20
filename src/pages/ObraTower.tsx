@@ -2,13 +2,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertaCard } from '../components/AlertaCard'
-import { BarrasAvance, CurvaS } from '../components/graficos'
+import { BarrasAvance, HealthDesglose, CurvaS } from '../components/graficos'
 import { SemaforoEjecutivo } from '../components/Semaforo'
 import { Badge, Card, Kpi, Titulo, cx } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { idx, mm, pct, pp } from '../domain/formato'
-import { healthScore } from '../domain/semaforo'
+import { healthDetalle } from '../domain/semaforo'
 import { useCalc } from '../store/hooks'
 
 const ESTADO_HITO = {
@@ -23,7 +24,8 @@ export default function ObraTower() {
   if (!c) return null
   const o = c.obra
   const u = d.config.umbrales
-  const score = healthScore(c, d.config)
+  const health = healthDetalle(c, d.config)
+  const score = health.score
   const alertas = d.alertas
     .filter((a) => a.obraId === o.id && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
     .sort((a, b) => ['critica', 'alta', 'media', 'baja'].indexOf(a.severidad) - ['critica', 'alta', 'media', 'baja'].indexOf(b.severidad))
@@ -45,6 +47,12 @@ export default function ObraTower() {
         )}
       </Card>
 
+      {score != null && (
+        <Card titulo="Health Score · cómo se compone" accion={<GuiaFigura compacto figura="health-score" titulo="Cómo se calcula el Health Score" texto="Siete tubos comunicantes, uno por dimensión y con el ancho de su peso. Al abrir la válvula el agua se nivela en el promedio ponderado; un accidente grave baja el tope a 59." />}>
+          <HealthDesglose {...health} />
+        </Card>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-3">
         <Card titulo="Avance de obra">
           <BarrasAvance plan={c.avancePlan} real={c.avanceReal} />
@@ -59,10 +67,13 @@ export default function ObraTower() {
         </Card>
 
         <Card titulo="Curva S" className="lg:col-span-2"
-          accion={<div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
+          accion={<div className="flex items-center gap-2">
+            <GuiaFigura compacto figura="curva-s" titulo="Cómo se lee el valor ganado (EVM)" texto="Tres probetas: lo planificado (PV), lo ganado (EV, lo que vale lo construido) y lo gastado (AC). Mueve la semana y compara alturas: SPI = EV ÷ PV mide plazo y CPI = EV ÷ AC mide costo." />
+            <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
             {(['costo', 'avance'] as const).map((m) => (
               <button key={m} onClick={() => setModo(m)} className={cx('rounded-md px-2.5 py-1', modo === m ? 'bg-slate-800 text-white' : 'text-slate-600')}>{m === 'costo' ? 'PV / EV / AC' : 'Avance %'}</button>
             ))}
+            </div>
           </div>}>
           <CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} modo={modo} />
         </Card>

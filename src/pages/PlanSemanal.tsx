@@ -4,13 +4,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
+import GuiaFigura from '../components/GuiaFigura'
+import { suave, useProgreso } from '../components/animacion'
 import { calcularObra } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { num, pct } from '../domain/formato'
 import {
   ACCIONES_TAREA, accionesTarea, avanceReportado, CAUSAS_CNC, estadoPPC, estadoTarea, ESTADOS_TAREA, indicadoresLP, liberacion, lunesDe, META_PPC,
   ppcSemana, semanaCerrada, puedeGestionarRestricciones, puedePlanificar, restriccionesAbiertas, restriccionUrgente, tareaCritica, TIPOS_RESTRICCION, TONO_TAREA,
-  type AccionTarea, type Contexto,
+  PPC_ROJO, type AccionTarea, type Contexto, type SemanaPPC,
 } from '../domain/lastPlanner'
 import type { CausaNoCumplimiento, TareaSemanal, TipoRestriccion } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
@@ -54,31 +56,8 @@ export default function PlanSemanal() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr] [&>*]:min-w-0">
-        <Card titulo="PPC por semana">
-          {ind.serie.length === 0 ? <p className="text-sm text-slate-500">Aún no hay semanas comprometidas.</p> : (
-            <div>
-              <div className="relative flex h-36 items-end gap-2 border-b border-slate-200">
-                <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-emerald-500" style={{ bottom: `${META_PPC * 100}%` }}>
-                  <span className="absolute -top-4 left-0 z-10 rounded bg-white px-1 text-[10px] text-emerald-700">meta {pct(META_PPC, 0)}</span>
-                </div>
-                {ind.serie.map((s) => {
-                  const alto = s.cerrada ? Math.max(2, (s.ppc ?? 0) * 100) : 100
-                  return (
-                    <button key={s.lunes} onClick={() => setSemana(s.lunes)} title={`${fmtSemana(s.lunes)}: ${s.cumplidas}/${s.comprometidas}`}
-                      className={cx('relative flex h-full min-w-0 flex-1 items-end justify-center', s.lunes === semana && 'rounded-t bg-blue-50')}>
-                      <span className={cx('relative w-full max-w-10 rounded-t', !s.cerrada ? 'bg-slate-200' : estadoPPC(s.ppc) === 'verde' ? 'bg-emerald-500' : estadoPPC(s.ppc) === 'amarillo' ? 'bg-amber-400' : 'bg-red-500')}
-                        style={{ height: `${alto}%` }}>
-                        <span className="tabular absolute inset-x-0 top-1 text-center text-[11px] font-medium text-white">{s.cerrada && s.ppc != null ? pct(s.ppc, 0) : ''}</span>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="mt-1 flex gap-2">
-                {ind.serie.map((s) => <span key={s.lunes} className="min-w-0 flex-1 truncate text-center text-[10px] text-slate-500">{s.cerrada ? fmtFecha(s.lunes).slice(0, 5) : 'en curso'}</span>)}
-              </div>
-            </div>
-          )}
+        <Card titulo="PPC por semana" accion={<GuiaFigura compacto figura="last-planner" titulo="Cómo se lee el Last Planner" texto="Cada semana se comprometen tareas del plan intermedio. Si sólo se comprometen tareas sin restricciones (rejilla cerrada) el PPC sube; comprometer a ciegas lo hunde." />}>
+          {ind.serie.length === 0 ? <p className="text-sm text-slate-500">Aún no hay semanas comprometidas.</p> : <GraficoPPC serie={ind.serie} semana={semana} onSemana={setSemana} />}
         </Card>
         <Card titulo="Causas de no cumplimiento (8 semanas)">
           {ind.causas.length === 0 ? <p className="text-sm text-slate-500">Sin tareas no cumplidas.</p> : (
@@ -313,5 +292,38 @@ function DetalleTarea({ x, ctx, onCerrar }: { x: TareaSemanal; ctx: Contexto; on
         ))}
       </div>
     </Modal>
+  )
+}
+
+// PPC por semana: las barras suben una tras otra; líneas de meta (80 %) y de alerta roja (60 %)
+function GraficoPPC({ serie, semana, onSemana }: { serie: SemanaPPC[]; semana: number; onSemana: (lunes: number) => void }) {
+  const anim = useProgreso<HTMLDivElement>(1800, serie.map((s) => s.ppc).join())
+  const crece = (i: number) => suave(Math.min(1, Math.max(0, anim.p * (serie.length + 2) - i) / 2))
+  return (
+    <div ref={anim.ref}>
+      <div className="relative flex h-36 items-end gap-2 border-b border-slate-200">
+        <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-emerald-500" style={{ bottom: `${META_PPC * 100}%` }}>
+          <span className="absolute -top-4 right-0 z-10 rounded bg-white px-1 text-[10px] text-emerald-700">meta {pct(META_PPC, 0)}</span>
+        </div>
+        <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-red-400" style={{ bottom: `${PPC_ROJO * 100}%` }}>
+          <span className="absolute -top-4 right-0 z-10 rounded bg-white px-1 text-[10px] text-red-600">alerta {pct(PPC_ROJO, 0)}</span>
+        </div>
+        {serie.map((s, i) => {
+          const alto = (s.cerrada ? Math.max(2, (s.ppc ?? 0) * 100) : 100) * crece(i)
+          return (
+            <button key={s.lunes} onClick={() => onSemana(s.lunes)} title={`${fmtSemana(s.lunes)}: ${s.cumplidas}/${s.comprometidas}`}
+              className={cx('relative flex h-full min-w-0 flex-1 items-end justify-center', s.lunes === semana && 'rounded-t bg-blue-50')}>
+              <span className={cx('relative w-full max-w-10 rounded-t', !s.cerrada ? 'bg-slate-200' : estadoPPC(s.ppc) === 'verde' ? 'bg-emerald-500' : estadoPPC(s.ppc) === 'amarillo' ? 'bg-amber-400' : 'bg-red-500')}
+                style={{ height: `${alto}%` }}>
+                <span className="tabular absolute inset-x-0 top-1 text-center text-[11px] font-medium text-white" style={{ opacity: crece(i) }}>{s.cerrada && s.ppc != null ? pct(s.ppc, 0) : ''}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-1 flex gap-2">
+        {serie.map((s) => <span key={s.lunes} className="min-w-0 flex-1 truncate text-center text-[10px] text-slate-500">{s.cerrada ? fmtFecha(s.lunes).slice(0, 5) : 'en curso'}</span>)}
+      </div>
+    </div>
   )
 }
