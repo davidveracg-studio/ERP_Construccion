@@ -11,7 +11,7 @@ import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 const W = 640, H = 380
 const ESC = 0.8, FONDO = 16, GAP = 4, Y0 = -8, Z0 = 7, ALTO = 100 * ESC + 6
 const PLATE = { x: -122, y: -34, w: 248, d: 72, r: 8 }
-const P = k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-96, Y0, Z0 + ALTO], [96, Y0, Z0 + ALTO + 10]], W, H, { pad: 12, azimuth: 62 })
+const P = k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-96, Y0, Z0 + ALTO], [96, Y0, Z0 + ALTO + 10]], W, H, { pad: 12, azimuth: 90, elevation: 18 })
 const { S, L, D, at, seg, box } = atajos(P)
 
 const tono = (v: number) => (v >= 80 ? 'text-emerald-700' : v >= 60 ? 'text-amber-700' : 'text-red-700')

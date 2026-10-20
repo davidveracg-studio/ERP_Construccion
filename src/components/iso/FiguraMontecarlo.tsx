@@ -22,7 +22,7 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
   const xFecha = (f: number) => xBin(0) - PASO / 2 + ((f - sim.histograma[0].desde) / dias) * PASO
   const ancho = B * PASO + 24
   const PLATE = { x: -ancho / 2 - 20, y: -30, w: ancho + 40, d: 70, r: 8 }
-  const P = useMemo(() => k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-ancho / 2, 0, 126], [ancho / 2, 0, 126]], W, H, { pad: 14, azimuth: 66 }), [ancho])
+  const P = useMemo(() => k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-ancho / 2, 0, 126], [ancho / 2, 0, 126]], W, H, { pad: 14, azimuth: 90, elevation: 18 }), [ancho])
   const { S, L, D, at, seg, box } = atajos(P)
   const cumple = (b: number) => sim.histograma[b].desde + dias <= sim.contractual
   const estatico = useMemo(() => {
