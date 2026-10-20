@@ -41,6 +41,7 @@ export default function Obra4D() {
   // Comparación de fechas: A según el preset (relativo a la fecha de la simulación) o una fecha fija
   const [comparar, setComparar] = useState<{ tipo: 'semana' | 'mes' | 'inicio' | 'fecha'; fecha: number } | null>(null)
   const visor = useRef<Visor4D | null>(null)
+  const [guia, setGuia] = useState(false)
 
   const obra = c?.obra
   const acts = c?.actualizado?.actividades
@@ -114,10 +115,11 @@ export default function Obra4D() {
   return (
     <div className="space-y-4">
       <Titulo sub="Contorno = dónde debería ir la obra según la línea base · sólido = avance real validado (proyección después de hoy)"
-        accion={puedeEditar ? <>
-          {bim && <Boton variante="secundario" onClick={() => { setSeleccion(null); setReproduciendo(false); setComparar(null); setAsignando({ actividadId: '', ids: new Set() }) }}>Asignar elementos a tareas</Boton>}
-          <Boton variante="secundario" onClick={() => setEditar(true)}>Configurar modelo</Boton>
-        </> : undefined}>
+        accion={<>
+          <Boton variante="secundario" onClick={() => setGuia(true)}>¿Cómo se lee?</Boton>
+          {puedeEditar && bim && <Boton variante="secundario" onClick={() => { setSeleccion(null); setReproduciendo(false); setComparar(null); setAsignando({ actividadId: '', ids: new Set() }) }}>Asignar elementos a tareas</Boton>}
+          {puedeEditar && <Boton variante="secundario" onClick={() => setEditar(true)}>Configurar modelo</Boton>}
+        </>}>
         Simulación 4D
       </Titulo>
 
@@ -267,6 +269,11 @@ export default function Obra4D() {
       {editar && (
         <EditorModelo modelo={modelo} acts={linea.actividades} guardado={!!obra.modelo4d} obraId={obra.id} onCerrar={() => setEditar(false)} />
       )}
+      <Modal abierto={guia} titulo="Cómo se lee la simulación 4D" onCerrar={() => setGuia(false)} ancho="sm:max-w-4xl">
+        <p className="mb-3 text-sm text-slate-600">Una maqueta de obra: mueve el cursor sobre la regla (o usa las flechas) y la obra se levanta según el programa. Lo sólido es lo ejecutado; el contorno marcado es lo que el plan ya pedía y aún falta. El reloj compara el avance real con el planificado.</p>
+        <iframe title="Figura: la obra en el tiempo" src={`${import.meta.env.BASE_URL}figuras/obra-4d-light.html`} className="h-[70vh] w-full rounded-lg border border-slate-200" />
+        <a href={`${import.meta.env.BASE_URL}figuras/obra-4d-light.html`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-marca">Abrir en una pestaña</a>
+      </Modal>
     </div>
   )
 }

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "figuras": "node tools/figura-4d/build.mjs && node tools/figura-4d/build.mjs --light"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.1",
