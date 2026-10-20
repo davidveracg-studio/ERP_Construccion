@@ -4,12 +4,12 @@
 // término contractual y los marcadores de la regla son P50 (bajo) y P80 (alto).
 import { useMemo, useRef, useState } from 'react'
 import type { SimulacionPlazo } from '../../domain/predictivo'
-import { fmtFecha } from '../../domain/fechas'
+import { fmtFecha, fmtFechaCorta } from '../../domain/fechas'
 import { pct } from '../../domain/formato'
 import { atajos, banco, COLOR, k, puntosLit } from './base'
 import { FiguraIso, useCursorVivo } from './Figura'
 
-const W = 560, H = 470
+const W = 560, H = 520
 const PASO = 8, ZF = 100, ZB = 10, YB = 4
 const LANZAR = 3.2, VUELO = 0.9
 
@@ -22,7 +22,7 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
   const xFecha = (f: number) => xBin(0) - PASO / 2 + ((f - sim.histograma[0].desde) / dias) * PASO
   const ancho = B * PASO + 24
   const PLATE = { x: -ancho / 2 - 20, y: -30, w: ancho + 40, d: 70, r: 8 }
-  const P = useMemo(() => k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-ancho / 2, 0, 126], [ancho / 2, 0, 126]], W, H, { pad: 14, azimuth: 90, elevation: 18 }), [ancho])
+  const P = useMemo(() => k.fitProjection([...k.boxCorners(PLATE, -15, 0), [-ancho / 2, 0, 126], [ancho / 2, 0, 126], [0, PLATE.y + PLATE.d, -48]], W, H, { pad: 14, azimuth: 90, elevation: 18 }), [ancho])
   const { S, L, D, at, seg, box } = atajos(P)
   const cumple = (b: number) => sim.histograma[b].desde + dias <= sim.contractual
   const estatico = useMemo(() => {
@@ -109,6 +109,30 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
   for (const [sx, sy, ok] of vuelo) (ok ? lleno : tarde).push([sx, sy])
   const caidas = cuentas.reduce((a, c) => a + c, 0)
   const listo = caidas >= N
+  const xc = xFecha(sim.contractual)
+  const cada = Math.max(1, Math.ceil(B / 5))
+  const fila = (x: number, extra: number) => { const [sx, sy] = at([x, PLATE.y + PLATE.d, -15]); return [sx, sy + extra] as const }
+  const rotulos = (
+    <g key="rot" fontFamily="ui-sans-serif, system-ui, sans-serif">
+      {sim.histograma.map((h, b) => {
+        const filas = Math.ceil(Math.round(cuentas[b] / porPunto) / 3)
+        const [px, py] = at([xBin(b), YB, ZB + 1.3 + filas * 2.4 + 2])
+        const [fx, fy] = fila(xBin(b), 14)
+        return (
+          <g key={b}>
+            {cuentas[b] > 0 && <text x={px} y={py} textAnchor="middle" fontSize="10" fontWeight="600" fill={cumple(b) ? '#047857' : '#b45309'}>{cuentas[b]}</text>}
+            {b % cada === 0 && <text x={fx} y={fy} textAnchor="middle" fontSize="10" fill="#64748b">{fmtFechaCorta(h.desde)}</text>}
+          </g>
+        )
+      })}
+      {(() => { const [x, y] = at([xc, 7, ZB + 34]); return <text x={x} y={y - 4} textAnchor="middle" fontSize="11" fontWeight="700" fill="#dc2626">Contrato</text> })()}
+      {([['P50', sim.p50], ['P80', sim.p80]] as const).map(([n, f]) => {
+        const [x, y] = fila(xFecha(f), 32)
+        return <g key={n} opacity={listo ? 1 : 0.3}><text x={x} y={y} textAnchor="middle" fontSize="11" fontWeight="700" fill="#334155">{n}</text><text x={x} y={y + 13} textAnchor="middle" fontSize="10" fill="#64748b">{fmtFechaCorta(f - 1)}</text></g>
+      })}
+      {(() => { const [x, y] = fila(xBin(0) - PASO, 14); return <text x={x - 6} y={y} textAnchor="end" fontSize="10" fill="#94a3b8">término →</text> })()}
+    </g>
+  )
   return (
     <div>
       <FiguraIso width={W} height={H} stageRef={vivo.ref}
@@ -128,6 +152,7 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
           `<g style="--anatomy-lit:${COLOR.ambar}">${puntosLit(tarde, 2.1)}</g>`,
           estatico.sep,
           <g key="p50" opacity={listo ? 1 : 0.25} transform={k.translateAlong(P, [xFecha(sim.p50), 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.marca(1.6) }} />,
+          rotulos,
           <g key="p80" opacity={listo ? 1 : 0.25} transform={k.translateAlong(P, [xFecha(sim.p80), 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.marca(2.8) }} />,
         ]}
       />
