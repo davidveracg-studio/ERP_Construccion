@@ -2,10 +2,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertaCard } from '../components/AlertaCard'
-import { BarrasAvance, HealthDesglose, CurvaS } from '../components/graficos'
+import { BarrasAvance, CurvaS } from '../components/graficos'
 import { SemaforoEjecutivo } from '../components/Semaforo'
 import { Badge, Card, Kpi, Titulo, cx } from '../components/ui'
-import GuiaFigura from '../components/GuiaFigura'
+import FiguraEVM from '../components/iso/FiguraEVM'
+import FiguraHealth from '../components/iso/FiguraHealth'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { idx, mm, pct, pp } from '../domain/formato'
@@ -20,6 +21,7 @@ const ESTADO_HITO = {
 export default function ObraTower() {
   const { d, c, sem } = useCalc()
   const [modo, setModo] = useState<'costo' | 'avance'>('costo')
+  const [focoS, setFocoS] = useState<number | null>(null)
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
   if (!c) return null
   const o = c.obra
@@ -48,8 +50,8 @@ export default function ObraTower() {
       </Card>
 
       {score != null && (
-        <Card titulo="Health Score · cómo se compone" accion={<GuiaFigura compacto figura="health-score" titulo="Cómo se calcula el Health Score" texto="Siete tubos comunicantes, uno por dimensión y con el ancho de su peso. Al abrir la válvula el agua se nivela en el promedio ponderado; un accidente grave baja el tope a 59." />}>
-          <HealthDesglose {...health} />
+        <Card titulo="Health Score · cómo se compone" accion={<span className="text-xs text-slate-500">Señala un tubo para ver su dimensión</span>}>
+          <FiguraHealth {...health} />
         </Card>
       )}
 
@@ -68,14 +70,17 @@ export default function ObraTower() {
 
         <Card titulo="Curva S" className="lg:col-span-2"
           accion={<div className="flex items-center gap-2">
-            <GuiaFigura compacto figura="curva-s" titulo="Cómo se lee el valor ganado (EVM)" texto="Tres probetas: lo planificado (PV), lo ganado (EV, lo que vale lo construido) y lo gastado (AC). Mueve la semana y compara alturas: SPI = EV ÷ PV mide plazo y CPI = EV ÷ AC mide costo." />
+            
             <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs">
             {(['costo', 'avance'] as const).map((m) => (
               <button key={m} onClick={() => setModo(m)} className={cx('rounded-md px-2.5 py-1', modo === m ? 'bg-slate-800 text-white' : 'text-slate-600')}>{m === 'costo' ? 'PV / EV / AC' : 'Avance %'}</button>
             ))}
             </div>
           </div>}>
-          <CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} modo={modo} />
+          <div className="grid items-center gap-4 xl:grid-cols-[3fr_2fr] [&>*]:min-w-0">
+            <CurvaS puntos={serie} corte={c.corte} eac={c.eac} terminoProyectado={c.terminoProyectado} modo={modo} foco={focoS} onFoco={setFocoS} />
+            <div className="mx-auto w-full max-w-md"><FiguraEVM puntos={serie} eac={c.eac} modo={modo} foco={focoS} onFoco={setFocoS} /></div>
+          </div>
         </Card>
       </div>
 

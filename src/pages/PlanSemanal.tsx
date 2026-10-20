@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
-import GuiaFigura from '../components/GuiaFigura'
+import FiguraPPC from '../components/iso/FiguraPPC'
 import { suave, useProgreso } from '../components/animacion'
 import { calcularObra } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
@@ -56,8 +56,13 @@ export default function PlanSemanal() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr] [&>*]:min-w-0">
-        <Card titulo="PPC por semana" accion={<GuiaFigura compacto figura="last-planner" titulo="Cómo se lee el Last Planner" texto="Cada semana se comprometen tareas del plan intermedio. Si sólo se comprometen tareas sin restricciones (rejilla cerrada) el PPC sube; comprometer a ciegas lo hunde." />}>
-          {ind.serie.length === 0 ? <p className="text-sm text-slate-500">Aún no hay semanas comprometidas.</p> : <GraficoPPC serie={ind.serie} semana={semana} onSemana={setSemana} />}
+        <Card titulo="PPC por semana" accion={<span className="text-xs text-slate-500">Elige una semana para ver sus tareas</span>}>
+          {ind.serie.length === 0 ? <p className="text-sm text-slate-500">Aún no hay semanas comprometidas.</p> : (
+            <div className="grid items-center gap-4 2xl:grid-cols-2 [&>*]:min-w-0">
+              <GraficoPPC serie={ind.serie} semana={semana} onSemana={setSemana} />
+              <div className="mx-auto w-full max-w-md"><FiguraPPC serie={ind.serie} semana={semana} onSemana={setSemana} /></div>
+            </div>
+          )}
         </Card>
         <Card titulo="Causas de no cumplimiento (8 semanas)">
           {ind.causas.length === 0 ? <p className="text-sm text-slate-500">Sin tareas no cumplidas.</p> : (
