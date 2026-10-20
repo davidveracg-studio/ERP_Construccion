@@ -6,7 +6,7 @@ import { useMemo } from 'react'
 import type { PuntoSerie } from '../../domain/evm'
 import { fmtFechaCorta } from '../../domain/fechas'
 import { mm, num, pct } from '../../domain/formato'
-import { anillo, atajos, banco, cursor, k, liquido, regla, vaso } from './base'
+import { anillo, atajos, banco, COLOR, cursor, k, liquido, regla, tinte, vaso } from './base'
 import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 
 const W = 560, H = 420
@@ -43,7 +43,7 @@ export default function FiguraEVM({ puntos, eac, modo, foco, onFoco }: {
       fondo: banco(P, PLATE) + regla(P, { x0: X0, largo: LARGO, y: RY, n, cada: 4, hoy: iCorte }) +
         S(box(-84, -36, 168, 8, 0, 1, 0.6), { tone: 'lo' }),
       vasos: vasos.map((v, i) => ({ pie: v.pie + llave(XS[i]), vidrio: v.vidrio })),
-      eac: modo === 'costo' && eac != null ? `<path class="iso-line" data-tone="mid" d="${anillo(P, XS[2], 0, R, BASE + eac * esc)}" style="stroke-dasharray:2 2"/>` : '',
+      eac: modo === 'costo' && eac != null ? `<path class="iso-line" d="${anillo(P, XS[2], 0, R, BASE + eac * esc)}" style="stroke:${COLOR.ac};stroke-width:1.2;stroke-dasharray:2 3"/>` : '',
       cursor: cursor(P, RY),
     }
   }, [n, iCorte, modo, eac, esc])
@@ -69,6 +69,12 @@ export default function FiguraEVM({ puntos, eac, modo, foco, onFoco }: {
       label="Tres probetas sobre un banco: valor planificado, valor ganado y costo real a la fecha del cursor. Un anillo en la del centro marca lo planificado y otro en la de la derecha lo ganado."
       aria="Instrumento de valor ganado: flechas cambian la fecha, Inicio y Fin van a los extremos"
       hint={modo === 'costo' ? 'PV · EV · AC' : 'Plan · Real'}
+      leyenda={modo === 'costo' ? [
+        { color: COLOR.pv, texto: 'PV planificado' },
+        { color: COLOR.ev, texto: 'EV ganado (anillo azul: lo ganado)' },
+        { color: COLOR.ac, texto: 'AC real (anillo punteado: EAC)' },
+        { color: COLOR.pv, texto: 'Anillo verde: donde debería ir', forma: 'linea' },
+      ] : [{ color: COLOR.pv, texto: 'Planificado' }, { color: COLOR.ev, texto: 'Real' }, { color: COLOR.pv, texto: 'Anillo: donde debería ir', forma: 'linea' }]}
       lectura={<>{fmtFechaCorta(puntos[Math.round(u)].fecha)}{despues ? ' (sólo plan)' : ''} · {modo === 'costo' ? 'PV' : 'plan'} {fmt(pv)} · {modo === 'costo' ? 'EV' : 'real'} {ev != null ? fmt(ev) : '—'}{modo === 'costo' && ac != null ? ` · AC ${fmt(ac)}` : ''}{spi != null ? ` · SPI ${num(spi, 2)}` : ''}{cpi != null ? ` · CPI ${num(cpi, 2)}` : ''}</>}
       onPointerMove={(e) => { if (e.pointerType === 'mouse' || e.buttons) onFoco(indice(e)) }}
       onPointerDown={(e) => onFoco(indice(e))}
@@ -84,10 +90,10 @@ export default function FiguraEVM({ puntos, eac, modo, foco, onFoco }: {
         estatico.fondo,
         ...XS.flatMap((x, i) => [
           estatico.vasos[i].pie,
-          liquido(P, x, 0, R, BASE, (vals[i] ?? 0) * esc, i === 1),
+          tinte(liquido(P, x, 0, R, BASE, (vals[i] ?? 0) * esc, false), [COLOR.pv, COLOR.ev, COLOR.ac][i], despues && i > 0 ? 0.5 : 0),
           estatico.vasos[i].vidrio,
-          i === 1 ? <path key="a1" className="iso-line" data-tone="hi" d={pv > 0 ? anillo(P, x, 0, R, BASE + pv * esc) : ''} style={{ strokeWidth: 1.2 }} /> : '',
-          i === 2 && ev != null && modo === 'costo' ? <path key="a2" className="iso-line" data-tone="hi" d={anillo(P, x, 0, R, BASE + ev * esc)} style={{ strokeWidth: 1.2 }} /> : '',
+          i === 1 ? <path key="a1" className="iso-line" d={pv > 0 ? anillo(P, x, 0, R, BASE + pv * esc) : ''} style={{ stroke: COLOR.pv, strokeWidth: 1.8 }} /> : '',
+          i === 2 && ev != null && modo === 'costo' ? <path key="a2" className="iso-line" d={anillo(P, x, 0, R, BASE + ev * esc)} style={{ stroke: COLOR.ev, strokeWidth: 1.8 }} /> : '',
           i === 2 ? estatico.eac : '',
         ]),
         <g key="cu" transform={k.translateAlong(P, [X0 + (LARGO * u) / n, 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.cursor }} />,

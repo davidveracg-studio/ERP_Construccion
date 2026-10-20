@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react'
 import type { DimensionHealth } from '../../domain/semaforo'
 import { cx } from '../ui'
-import { atajos, banco, k } from './base'
+import { atajos, banco, COLOR, colorEstado, k, tinte } from './base'
 import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 
 const W = 640, H = 380
@@ -65,6 +65,12 @@ export default function FiguraHealth({ dimensiones, score, sinTope, tope }: { di
         label="Siete tubos de vidrio de distinto ancho sobre un colector con válvula, uno por dimensión del Health Score, y un tubo de lectura con flotador."
         aria="Health Score: flechas eligen un tubo; Escape abre la válvula"
         hint={u < 0.98 ? 'Válvula cerrada · cada tubo en su nivel' : 'Válvula abierta · nivel común'}
+        leyenda={[
+          { color: COLOR.verde, texto: '≥ 80 saludable' },
+          { color: COLOR.ambar, texto: '60–79 alerta' },
+          { color: COLOR.rojo, texto: '< 60 riesgo' },
+          ...(tope ? [{ color: COLOR.contrato, texto: 'Tope 59 por accidente grave' }] : []),
+        ]}
         lectura={d ? <>{d.nombre} {d.valor != null ? Math.round(d.valor) : 'sin datos'} · peso {Math.round(d.peso * 100)} %</> : <>score <b>{score != null ? Math.round(score) : '—'}</b>{tope ? ' · tope 59 por accidente grave' : ''}</>}
         onPointerMove={(e) => { const i = tuboEn(e); setSel(i >= 0 ? i : null) }}
         onPointerLeave={() => setSel(null)}
@@ -75,12 +81,12 @@ export default function FiguraHealth({ dimensiones, score, sinTope, tope }: { di
         capas={[
           estatico.colector,
           ...tubos.flatMap((t, i) => [
-            t.valor != null ? caja(t.x + 0.4, Y0 + 0.4, t.w - 0.8, FONDO - 0.8, Z0, (t.valor + (m - t.valor) * u) * ESC, i === sel) : '',
+            t.valor != null ? tinte(caja(t.x + 0.4, Y0 + 0.4, t.w - 0.8, FONDO - 0.8, Z0, (t.valor + (m - t.valor) * u) * ESC), colorEstado(t.valor), sel != null && i !== sel ? 0.55 : 0) : '',
             estatico.tuboV[i],
           ]),
-          u > 0.01 ? caja(GX + 0.4, Y0 + 5.4, 5.2, 5.2, Z0, m * ESC * u) : '',
+          u > 0.01 ? tinte(caja(GX + 0.4, Y0 + 5.4, 5.2, 5.2, Z0, m * ESC * u), colorEstado(score ?? m)) : '',
           estatico.lectura,
-          <g key="tp" transform={k.translateAlong(P, [0, 0, Z0 + (tope ? 59 : 108) * ESC + 3])} dangerouslySetInnerHTML={{ __html: estatico.tope }} />,
+          <g key="tp" style={tope ? { ['--anatomy-mid' as string]: COLOR.contrato, ['--anatomy-paper' as string]: '#fecaca', ['--anatomy-top' as string]: '#fee2e2' } : undefined} transform={k.translateAlong(P, [0, 0, Z0 + (tope ? 59 : 108) * ESC + 3])} dangerouslySetInnerHTML={{ __html: estatico.tope }} />,
           <g key="fl" transform={k.translateAlong(P, [0, 0, Z0 + lecturaV * ESC])} dangerouslySetInnerHTML={{ __html: estatico.flot }} />,
           palanca,
         ]}

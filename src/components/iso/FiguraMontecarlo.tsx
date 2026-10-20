@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { SimulacionPlazo } from '../../domain/predictivo'
 import { fmtFecha } from '../../domain/fechas'
 import { pct } from '../../domain/formato'
-import { atajos, banco, k, puntosLit } from './base'
+import { atajos, banco, COLOR, k, puntosLit } from './base'
 import { FiguraIso, useCursorVivo } from './Figura'
 
 const W = 560, H = 470
@@ -32,8 +32,8 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
     out.push(S(k.slabOf(tira, 0, 0.6, P, 3), { tone: 'lo', crease: 'none' }))
     out.push(L(sim.histograma.map((_, b) => k.lineOnTop([xBin(b), tira.y], [xBin(b), tira.y + 2.4], 0.6, P)).join(''), { tone: 'lo' }))
     const xc = Math.min(tira.x + tira.w - 1, Math.max(tira.x + 1, xFecha(sim.contractual)))
-    out.push(L(k.lineOnTop([xc, tira.y], [xc, tira.y + tira.d - 1], 0.6, P), { tone: 'hi' }))
-    out.push(D([at([xc, tira.y + tira.d - 1, 0.6])], { size: 0.6, tone: 'hi' }))
+    out.push(`<g style="--anatomy-hi:${COLOR.contrato};--anatomy-dot:${COLOR.contrato}">` + L(k.lineOnTop([xc, tira.y], [xc, tira.y + tira.d - 1], 0.6, P), { tone: 'hi' }))
+    out.push(D([at([xc, tira.y + tira.d - 1, 0.6])], { size: 0.6, tone: 'hi' }) + '</g>')
     // Tablero, tolva y clavos
     const x0 = -ancho / 2, x1 = ancho / 2
     out.push(S(box(x0 - 4, -8, ancho + 8, 18, 0, ZB, 1), { tone: 'mid' }))
@@ -50,7 +50,7 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
     // Separadores de casilleros y placa del término contractual (delante de las pilas)
     const sep: string[] = []
     for (let b = 0; b <= B; b++) sep.push(S(box(xBin(b) - PASO / 2 - 0.4, 2, 0.8, 5, ZB, 26, 0.1), { tone: 'lo', crease: 'none' }))
-    sep.push(S(box(xc - 0.6, 6.4, 1.2, 1.2, ZB, 32, 0.1), { tone: 'hi', crease: 'none' }))
+    sep.push(`<g style="--anatomy-hi:${COLOR.contrato};--anatomy-paper:#fca5a5;--anatomy-shade-0:#dc2626;--anatomy-shade-1:#ef4444;--anatomy-shade-2:#f87171;--anatomy-shade-3:#fca5a5;--anatomy-top:#fecaca">${S(box(xc - 0.6, 6.4, 1.2, 1.2, ZB, 32, 0.1), { tone: 'hi', crease: 'none' })}</g>`)
     return { fondo, sep: sep.join(''), marca: (alto: number) => S(k.slabOf({ x: -1.4, y: tira.y + 3.2, w: 2.8, d: 3, r: 0.6 }, 0.6, alto, P, 2), { tone: alto > 2 ? 'hi' : 'mid' }) }
   }, [P, sim])
 
@@ -99,14 +99,14 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
     vuelo.push([sx, sy, cumple(x.b)])
   })
   const lleno: [number, number][] = []
-  const anillos: string[] = []
+  const tarde: [number, number][] = []
   cuentas.forEach((c, b) => {
     for (let i = 0; i < Math.round(c / porPunto); i++) {
       const [sx, sy] = at([xBin(b) + ((i % 3) - 1) * 2.4, YB, ZB + 1.3 + Math.floor(i / 3) * 2.4])
-      if (cumple(b)) lleno.push([sx, sy]); else anillos.push(`M${(sx - 1.1).toFixed(1)} ${sy.toFixed(1)}a1.1 1.1 0 1 0 2.2 0a1.1 1.1 0 1 0 -2.2 0`)
+      ;(cumple(b) ? lleno : tarde).push([sx, sy])
     }
   })
-  for (const [sx, sy, ok] of vuelo) { if (ok) lleno.push([sx, sy]); else anillos.push(`M${(sx - 1.1).toFixed(1)} ${sy.toFixed(1)}a1.1 1.1 0 1 0 2.2 0a1.1 1.1 0 1 0 -2.2 0`) }
+  for (const [sx, sy, ok] of vuelo) (ok ? lleno : tarde).push([sx, sy])
   const caidas = cuentas.reduce((a, c) => a + c, 0)
   const listo = caidas >= N
   return (
@@ -114,12 +114,18 @@ export default function FiguraMontecarlo({ sim }: { sim: SimulacionPlazo }) {
       <FiguraIso width={W} height={H} stageRef={vivo.ref}
         label={`Tablero de Galton con ${N} corridas de la simulación del plazo apiladas por semana de término; una placa marca el término contractual.`}
         aria="Monte Carlo del plazo como tablero de Galton"
-        hint={listo ? `${N} corridas · relleno = en plazo` : `simulando… ${caidas} de ${N}`}
+        hint={listo ? `${N} corridas` : `simulando… ${caidas} de ${N}`}
+        leyenda={[
+          { color: COLOR.verde, texto: 'Termina dentro del plazo', forma: 'punto' },
+          { color: COLOR.ambar, texto: 'Termina después del plazo', forma: 'punto' },
+          { color: COLOR.contrato, texto: 'Término contractual', forma: 'linea' },
+          { color: '#475569', texto: 'Marcadores: P50 (bajo) y P80 (alto)' },
+        ]}
         lectura={<>P50 {fmtFecha(sim.p50 - 1)} · P80 {fmtFecha(sim.p80 - 1)} · cumple {pct(sim.probCumplir, 0)}</>}
         capas={[
           estatico.fondo,
-          puntosLit(lleno, 1.2),
-          `<path class="iso-line" data-tone="hi" d="${anillos.join('')}" style="stroke-width:0.9"/>`,
+          `<g style="--anatomy-lit:${COLOR.verde}">${puntosLit(lleno, 2.1)}</g>`,
+          `<g style="--anatomy-lit:${COLOR.ambar}">${puntosLit(tarde, 2.1)}</g>`,
           estatico.sep,
           <g key="p50" opacity={listo ? 1 : 0.25} transform={k.translateAlong(P, [xFecha(sim.p50), 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.marca(1.6) }} />,
           <g key="p80" opacity={listo ? 1 : 0.25} transform={k.translateAlong(P, [xFecha(sim.p80), 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.marca(2.8) }} />,

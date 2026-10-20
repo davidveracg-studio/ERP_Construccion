@@ -23,7 +23,9 @@ function useEstilos() {
 
 export type Capa = string | ReactNode
 
-export function FiguraIso({ width, height, label, capas, hint, lectura, aria, stageRef, onPointerMove, onPointerDown, onPointerLeave, onKeyDown, className }: {
+export type ItemLeyenda = { color: string; texto: string; forma?: 'bloque' | 'linea' | 'anillo' | 'punto' }
+
+export function FiguraIso({ width, height, label, capas, hint, lectura, aria, stageRef, onPointerMove, onPointerDown, onPointerLeave, onKeyDown, className, leyenda }: {
   width: number
   height: number
   label: string
@@ -37,6 +39,8 @@ export function FiguraIso({ width, height, label, capas, hint, lectura, aria, st
   onPointerLeave?: (e: React.PointerEvent<HTMLDivElement>) => void
   onKeyDown?: (e: React.KeyboardEvent<HTMLDivElement>) => void
   className?: string
+  /** Colores de la figura, igual que la leyenda de los gráficos. */
+  leyenda?: ItemLeyenda[]
 }) {
   useEstilos()
   return (
@@ -51,6 +55,19 @@ export function FiguraIso({ width, height, label, capas, hint, lectura, aria, st
         {hint && <span className="uppercase tracking-wider">{hint}</span>}
         <span className="tabular ml-auto text-slate-700" aria-live="polite">{lectura}</span>
       </div>
+      {leyenda && leyenda.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          {leyenda.map((l) => (
+            <span key={l.texto} className="inline-flex items-center gap-1.5">
+              {l.forma === 'linea' ? <span className="h-0.5 w-4" style={{ background: l.color }} />
+                : l.forma === 'anillo' ? <span className="h-2.5 w-2.5 rounded-full border-2" style={{ borderColor: l.color }} />
+                : l.forma === 'punto' ? <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} />
+                : <span className="h-3 w-3 rounded-sm" style={{ background: l.color }} />}
+              {l.texto}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { useMemo } from 'react'
 import type { SemanaCaja } from '../../domain/caja'
 import { fmtFechaCorta } from '../../domain/fechas'
 import { mm } from '../../domain/formato'
-import { anillo, atajos, banco, cursor, k, liquido, regla, vaso } from './base'
+import { anillo, atajos, banco, COLOR, cursor, k, liquido, regla, tinte, vaso } from './base'
 import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 
 const W = 560, H = 400
@@ -73,7 +73,7 @@ export default function FiguraCaja({ semanas, colchon, corte, foco, onFoco }: {
       fondo: [banco(P, PLATE), regla(P, { x0: X0, largo: LARGO, y: RY, n: Math.max(1, n), cada: 4, hoy: iHoy }), entrada(), r.pie].join(''),
       retVidrio: r.vidrio + retorno(),
       tPie: t.pie,
-      tVidrio: t.vidrio + `<path class="iso-line" data-tone="hi" d="${anillo(P, T.x, T.y, T.r, T.base + colchon * escala.esc)}" style="stroke-width:1.2"/>`,
+      tVidrio: t.vidrio + `<path class="iso-line" d="${anillo(P, T.x, T.y, T.r, T.base + colchon * escala.esc)}" style="stroke:${COLOR.colchon};stroke-width:1.4;stroke-dasharray:3 2"/>`,
       salida: salida(),
       cursor: cursor(P, RY),
     }
@@ -100,6 +100,13 @@ export default function FiguraCaja({ semanas, colchon, corte, foco, onFoco }: {
       label="Estanque de caja sobre un banco: se llena con los cobros de la semana, se vacía con los pagos y un estanque chico guarda las retenciones; una regla recorre las semanas de la obra."
       aria="Instrumento de caja: flechas cambian la semana, Inicio y Fin van a los extremos"
       hint="Recorre las semanas"
+      leyenda={[
+        { color: COLOR.caja, texto: 'Caja disponible (más claro = proyectado)' },
+        { color: COLOR.cobro, texto: 'Cobros de la semana', forma: 'linea' },
+        { color: COLOR.pago, texto: 'Pagos de la semana', forma: 'linea' },
+        { color: COLOR.retencion, texto: 'Retenciones de EP' },
+        { color: COLOR.colchon, texto: 'Colchón mínimo', forma: 'linea' },
+      ]}
       lectura={<>sem {fmtFechaCorta(sem.desde)}{sem.real ? '' : ' (proy.)'} · caja <b className={saldo < colchon ? 'text-amber-700' : ''}>{mm(saldo)}</b> · retenido {mm(retenido)}</>}
       onPointerMove={(e) => { if (e.pointerType === 'mouse' || e.buttons) onFoco(indice(e)) }}
       onPointerDown={(e) => onFoco(indice(e))}
@@ -113,14 +120,14 @@ export default function FiguraCaja({ semanas, colchon, corte, foco, onFoco }: {
       }}
       capas={[
         estatico.fondo,
-        liquido(P, RT.x, RT.y, RT.r, RT.base, retenido * escala.ret, false),
+        tinte(liquido(P, RT.x, RT.y, RT.r, RT.base, retenido * escala.ret, false), COLOR.retencion),
         estatico.retVidrio,
         estatico.tPie,
-        liquido(P, T.x, T.y, T.r, T.base, h, sem.real),
+        tinte(liquido(P, T.x, T.y, T.r, T.base, h, false), saldo < colchon ? COLOR.colchon : COLOR.caja, sem.real ? 0 : 0.6),
         estatico.tVidrio,
-        <path key="ch" className="iso-line" data-tone="lit" data-flow="" d={seg([SX, SY, 96], [SX, SY, T.base + h])} style={{ strokeWidth: 1.6, opacity: opEntra }} />,
+        <path key="ch" className="iso-line" data-flow="" d={seg([SX, SY, 96], [SX, SY, T.base + h])} style={{ stroke: COLOR.cobro, strokeWidth: 2.4, opacity: opEntra }} />,
         estatico.salida,
-        <path key="de" className="iso-line" data-tone="hi" data-flow="" d={seg([OX, OY, 6.5], [OX, OY, 1])} style={{ strokeWidth: 1.4, opacity: opSale }} />,
+        <path key="de" className="iso-line" data-flow="" d={seg([OX, OY, 6.5], [OX, OY, 1])} style={{ stroke: COLOR.pago, strokeWidth: 2.4, opacity: opSale }} />,
         <g key="cu" transform={k.translateAlong(P, [xCur, 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.cursor }} />,
       ]}
     />

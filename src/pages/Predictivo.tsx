@@ -52,7 +52,7 @@ export default function Predictivo() {
           {!sim ? <p className="text-sm text-slate-500">No se pudo simular.</p> : (
             <>
               <div className="mx-auto max-w-lg"><FiguraMontecarlo sim={sim} /></div>
-              <p className="mt-2 text-xs text-slate-500">Cada bolita es una corrida: rellena si termina dentro del plazo contractual (la placa marcada), anillo si termina después; en la regla, P50 (marcador bajo) y P80 (alto). Cada simulación varía la duración restante de las actividades (triangular según el SPI, con cola hacia el atraso) y suma días de lluvia por mes (Poisson). P10 {fmtFecha(sim.p10 - 1)} · P90 {fmtFecha(sim.p90 - 1)}.</p>
+              <p className="mt-2 text-xs text-slate-500">Cada bolita es una corrida de la simulación, apilada en la semana en que termina la obra. Cada simulación varía la duración restante de las actividades (triangular según el SPI, con cola hacia el atraso) y suma días de lluvia por mes (Poisson). P10 {fmtFecha(sim.p10 - 1)} · P90 {fmtFecha(sim.p90 - 1)}.</p>
               {sim.criticidad.length > 0 && (
                 <div className="mt-3">
                   <div className="mb-1 text-sm font-medium">Índice de criticidad (veces en la ruta crítica)</div>

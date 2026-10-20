@@ -5,7 +5,7 @@ import { useMemo, useRef } from 'react'
 import { META_PPC, type SemanaPPC } from '../../domain/lastPlanner'
 import { fmtFecha } from '../../domain/fechas'
 import { pct } from '../../domain/formato'
-import { atajos, banco, cursor, k, puntosLit, regla } from './base'
+import { atajos, banco, COLOR, cursor, k, puntosLit, regla, tinte } from './base'
 import { enViewBox, FiguraIso, useCursorVivo } from './Figura'
 
 const W = 560, H = 380
@@ -32,7 +32,7 @@ function bandeja(t: typeof BAND.b) {
 }
 const lugar = (t: typeof BAND.b, i: number, cols: number): [number, number, number] => {
   const c = i % cols, f = Math.floor(i / cols)
-  return [t.x + 6 + c * 8 + (f % 2) * 2, t.y + 6 + f * 8, t.z + 1.4]
+  return [t.x + 6 + c * 8 + (f % 2) * 2, t.y + 6 + f * 8, t.z + 2.4]
 }
 const salto = (p: number[], q: number[], f: number): [number, number, number] => {
   const e = f * f * (3 - 2 * f)
@@ -43,8 +43,8 @@ export default function FiguraPPC({ serie, semana, onSemana }: { serie: SemanaPP
   const n = Math.max(1, serie.length - 1)
   const iSel = Math.max(0, serie.findIndex((s) => s.lunes === semana))
   const estatico = useMemo(() => ({
-    fondo: banco(P, PLATE) + regla(P, { x0: X0, largo: LARGO, y: RY, n, cada: 1 }) + bandeja(BAND.b) +
-      S(box(BAND.b.x + BAND.b.w, -26, BAND.c.x - BAND.b.x - BAND.b.w + 4, 8, 16, 1, 0.3), { tone: 'lo' }) + bandeja(BAND.c) + bandeja(BAND.d),
+    fondo: banco(P, PLATE) + regla(P, { x0: X0, largo: LARGO, y: RY, n, cada: 1 }) + tinte(bandeja(BAND.b), COLOR.ev, 0.75) +
+      S(box(BAND.b.x + BAND.b.w, -26, BAND.c.x - BAND.b.x - BAND.b.w + 4, 8, 16, 1, 0.3), { tone: 'lo' }) + tinte(bandeja(BAND.c), COLOR.verde, 0.75) + tinte(bandeja(BAND.d), COLOR.rojo, 0.75),
     cursor: cursor(P, RY),
   }), [n])
   // La caída arranca cada vez que cambia la semana elegida
@@ -58,16 +58,17 @@ export default function FiguraPPC({ serie, semana, onSemana }: { serie: SemanaPP
   if (!s) return null
   const t = quieto ? 9 : vivo.t - inicio.current.t
   const fC = s.cerrada ? Math.min(1, Math.max(0, (t - 0.5) / 1.4)) : 0
-  const lit: [number, number][] = []
-  const anillos: string[] = []
+  // En la bandeja de arriba todas son comprometidas (azul); al caer toman su color
+  const enCurso: [number, number][] = []
+  const ok: [number, number][] = []
+  const no: [number, number][] = []
   let iC = 0, iD = 0
   for (let i = 0; i < s.comprometidas; i++) {
-    const ok = i < s.cumplidas
+    const cumplida = i < s.cumplidas
     const a = lugar(BAND.b, i, 7)
-    const destino = ok ? lugar(BAND.c, iC++, 6) : lugar(BAND.d, iD++, 6)
+    const destino = cumplida ? lugar(BAND.c, iC++, 6) : lugar(BAND.d, iD++, 6)
     const [sx, sy] = at(fC > 0 ? salto(a, destino, fC) : a)
-    if (ok || !s.cerrada) lit.push([sx, sy])
-    else anillos.push(`M${(sx - 2).toFixed(1)} ${sy.toFixed(1)}a2 2 0 1 0 4 0a2 2 0 1 0 -4 0`)
+    ;(fC < 0.5 ? enCurso : cumplida ? ok : no).push([sx, sy])
   }
   const x0s = at([X0, RY, 0])[0], x1s = at([X0 + LARGO, RY, 0])[0]
   const indice = (e: React.PointerEvent<HTMLDivElement>) => Math.round(Math.min(1, Math.max(0, (enViewBox(e, vivo.ref.current, W, H)[0] - x0s) / (x1s - x0s))) * n)
@@ -76,6 +77,11 @@ export default function FiguraPPC({ serie, semana, onSemana }: { serie: SemanaPP
       label="Bandejas en cascada: arriba las tareas comprometidas de la semana; al cerrarla, las cumplidas caen a la bandeja de hecho y las otras a la de no cumplidas."
       aria="Instrumento del PPC: flechas cambian la semana"
       hint={s.cerrada ? 'arriba: comprometidas · abajo: hecho / no cumplidas' : 'semana en curso'}
+      leyenda={[
+        { color: COLOR.ev, texto: 'Comprometida', forma: 'punto' },
+        { color: COLOR.verde, texto: 'Cumplida', forma: 'punto' },
+        { color: COLOR.rojo, texto: 'No cumplida', forma: 'punto' },
+      ]}
       lectura={<>{fmtFecha(s.lunes).slice(0, 5)} · {s.cerrada ? <>cumplidas {s.cumplidas} de {s.comprometidas} · PPC <b className={s.ppc != null && s.ppc < META_PPC ? 'text-amber-700' : ''}>{s.ppc != null ? pct(s.ppc, 0) : '—'}</b></> : <>{s.comprometidas} comprometidas</>}</>}
       onPointerDown={(e) => onSemana(serie[indice(e)].lunes)}
       onKeyDown={(e) => {
@@ -86,8 +92,9 @@ export default function FiguraPPC({ serie, semana, onSemana }: { serie: SemanaPP
       }}
       capas={[
         estatico.fondo,
-        `<path class="iso-line" data-tone="hi" d="${anillos.join('')}" style="stroke-width:1.1"/>`,
-        puntosLit(lit, 2.1),
+        `<g style="--anatomy-lit:${COLOR.ev}">${puntosLit(enCurso, 5)}</g>`,
+        `<g style="--anatomy-lit:${COLOR.verde}">${puntosLit(ok, 5)}</g>`,
+        `<g style="--anatomy-lit:${COLOR.rojo}">${puntosLit(no, 5)}</g>`,
         <g key="cu" transform={k.translateAlong(P, [X0 + (LARGO * vivo.u) / n, 0, 0])} dangerouslySetInnerHTML={{ __html: estatico.cursor }} />,
       ]}
     />
