@@ -76,11 +76,11 @@ export function Kpi({ etiqueta, valor, sub, estado, ayuda }: { etiqueta: string;
   )
 }
 
-export function Modal({ abierto, titulo, onCerrar, children }: { abierto: boolean; titulo: string; onCerrar: () => void; children: ReactNode }) {
+export function Modal({ abierto, titulo, onCerrar, children, ancho = 'sm:max-w-lg' }: { abierto: boolean; titulo: string; onCerrar: () => void; children: ReactNode; ancho?: string }) {
   if (!abierto) return null
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 sm:items-center" onClick={onCerrar}>
-      <div role="dialog" aria-modal="true" aria-label={titulo} className="max-h-[90vh] w-full overflow-auto rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-lg sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={titulo} className={`max-h-[90vh] w-full overflow-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl ${ancho}`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold">{titulo}</h3>
           <button onClick={onCerrar} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Cerrar">✕</button>
