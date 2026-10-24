@@ -10,6 +10,7 @@ import { clp, idx, mm, num, pct } from '../domain/formato'
 import { periodosDe } from '../domain/periodos'
 import { puCosto } from '../domain/presupuesto'
 import { TIPOS_RECURSO } from '../domain/types'
+import { umbral } from '../domain/umbrales'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
 import { ayudaKpi, ek } from '../store/umbralesUI'
@@ -66,7 +67,7 @@ export default function PartidaDetalle() {
           {tendencia.some((v) => v != null) && (
             <div className="mt-4">
               <div className="text-xs text-slate-500">CPI de la partida, últimos cierres</div>
-              <Sparkline valores={tendencia} umbral={0.98} />
+              <Sparkline valores={tendencia} umbral={umbral(d.config, 'KCO-03').alerta} />
             </div>
           )}
         </Card>

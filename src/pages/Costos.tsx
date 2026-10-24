@@ -8,6 +8,7 @@ import { idx, mm, num, pct } from '../domain/formato'
 import { TIPOS_RECURSO, type TipoRecurso } from '../domain/types'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 type Tab = 'partidas' | 'sin_imputar' | 'compromisos' | 'ajustes'
 
@@ -79,7 +80,7 @@ export default function Costos() {
                               </div>
                             </td>
                             <td>{pct(p.avance, 0)}</td><td>{mm(p.bac)}</td><td>{mm(p.comprometido)}</td><td>{mm(p.ac)}</td><td>{mm(p.ev)}</td>
-                            <td className={cx(p.cpi != null && p.cpi < 0.95 && 'font-semibold text-crit')}>{idx(p.cpi)}</td>
+                            <td className={cx(ek('KCO-03', p.cpi) === 'rojo' && 'font-semibold text-crit', ek('KCO-03', p.cpi) === 'amarillo' && 'font-semibold text-warn')} title={ayudaKpi('KCO-03')}>{idx(p.cpi)}</td>
                             <td>{mm(p.etc)}{p.ajuste && <span className="ml-1 text-[10px] text-marca" title={`Ajuste manual: ${p.ajuste.motivo}`}>✎</span>}</td>
                             <td>{mm(p.eac)}</td>
                             <td className={cx(p.vac < 0 ? 'text-crit' : 'text-slate-600')}>{mm(p.vac)}</td>
