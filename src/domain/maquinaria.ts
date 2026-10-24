@@ -2,6 +2,7 @@
 // disponibles, trabajadas por partida, improductivas con causa, mantención y combustible. Al validarse,
 // las horas trabajadas son costo real de equipo de cada partida (tarifa por hora, o el costo fijo del día
 // repartido entre las partidas). Utilización, costo hora real, consumo y rendimiento salen de los partes.
+import { UMBRALES_DOC14 } from './umbrales'
 import type { CausaImproductiva, Dia, Equipo, ParteMaquinaria, Partida, Rol } from './types'
 
 export const CAUSAS_IMPRODUCTIVAS: Record<CausaImproductiva, string> = {
@@ -11,10 +12,10 @@ export const PROPIEDAD: Record<Equipo['propiedad'], string> = { propio: 'Propio'
 export const MODALIDAD: Record<Equipo['tarifa']['modalidad'], string> = { hora: 'por hora', dia: 'por día', mes: 'por mes' }
 
 /** KMQ-01: verde ≥ 75 %, RULE-205 bajo 60 % (costo fijo). */
-export const UTILIZACION_VERDE = 0.75
-export const UTILIZACION_MIN = 0.6
+export const UTILIZACION_VERDE = UMBRALES_DOC14['KMQ-01'].objetivo!
+export const UTILIZACION_MIN = UMBRALES_DOC14['KMQ-01'].alerta
 /** RULE-206: improductivas sobre 20 % de las disponibles, o la misma causa 3 días seguidos. */
-export const IMPRODUCTIVAS_MAX = 0.2
+export const IMPRODUCTIVAS_MAX = UMBRALES_DOC14['KMQ-02'].alerta
 export const DIAS_CAUSA_REPETIDA = 3
 /** Ventana de los indicadores (KMQ semanales y RULE-205/206). */
 export const VENTANA = 7

@@ -10,7 +10,8 @@ import FiguraHealth from '../components/iso/FiguraHealth'
 import { serieCurvaS } from '../domain/evm'
 import { fmtFecha, hoy } from '../domain/fechas'
 import { idx, mm, pct, pp } from '../domain/formato'
-import { healthDetalle } from '../domain/semaforo'
+import { estadoHealth, healthDetalle, nivelHealth } from '../domain/semaforo'
+import { estadoKpi, estadoUmbral, textoUmbral, umbral, umbralMargen, type KpiId } from '../domain/umbrales'
 import { useCalc } from '../store/hooks'
 
 const ESTADO_HITO = {
@@ -25,19 +26,22 @@ export default function ObraTower() {
   const serie = useMemo(() => (c ? serieCurvaS(d, c.obra.id, c.corte) : []), [d, c])
   if (!c) return null
   const o = c.obra
-  const u = d.config.umbrales
   const health = healthDetalle(c, d.config)
   const score = health.score
   const alertas = d.alertas
     .filter((a) => a.obraId === o.id && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
     .sort((a, b) => ['critica', 'alta', 'media', 'baja'].indexOf(a.severidad) - ['critica', 'alta', 'media', 'baja'].indexOf(b.severidad))
-  const est = (v: number | null, uu: [number, number]) => (v == null ? 'na' : v >= uu[0] ? 'verde' : v >= uu[1] ? 'amarillo' : 'rojo') as 'verde'
+  const cfg = d.config
+  const ayuda = (id: KpiId, f: (v: number) => string) => `Doc 14 ${id}: ${textoUmbral(umbral(cfg, id), f)}`
+  const fIdx = (v: number) => idx(v)
+  const fPct = (v: number) => pct(v, 0)
+  const utilidadOfertada = c.venta * o.margenOfertado
 
   return (
     <div className="space-y-5">
       <Titulo sub={`${o.mandante} · Administrador: ${o.administrador} · inicio ${fmtFecha(o.fechaInicio)} · plazo ${o.plazoDias} días`}
         accion={<><Link to="/informe" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Informe semanal</Link><Link to="/cierre" className="rounded-lg bg-marca px-3 py-2 text-sm text-white">Cerrar semana</Link></>}>
-        {o.nombre} {score != null && <span className="ml-2 align-middle"><Badge tono={score >= 80 ? 'verde' : score >= 60 ? 'ambar' : 'rojo'}>Health Score {Math.round(score)}</Badge></span>}
+        {o.nombre} {score != null && <span className="ml-2 align-middle"><Badge tono={estadoHealth(score) === 'verde' ? 'verde' : estadoHealth(score) === 'amarillo' ? 'ambar' : 'rojo'}>Health Score {Math.round(score)} · {nivelHealth(score)}</Badge></span>}
       </Titulo>
 
       <Card titulo="Semáforo ejecutivo" accion={<span className="text-xs text-slate-500">Toca una dimensión para ver por qué</span>}>
@@ -59,7 +63,7 @@ export default function ObraTower() {
         <Card titulo="Avance de obra">
           <BarrasAvance plan={c.avancePlan} real={c.avanceReal} />
           <dl className="tabular mt-4 grid grid-cols-2 gap-y-2 text-sm">
-            <dt className="text-slate-500">Desviación</dt><dd className={cx('text-right font-semibold', c.desvAvance < u.avancePp[1] ? 'text-crit' : c.desvAvance < u.avancePp[0] ? 'text-warn' : 'text-ok')}>{pp(c.desvAvance)}</dd>
+            <dt className="text-slate-500">Desviación</dt><dd className={cx('text-right font-semibold', { rojo: 'text-crit', amarillo: 'text-warn', verde: 'text-ok', na: '' }[estadoKpi(cfg, 'KPL-03', c.desvAvance)])}>{pp(c.desvAvance)}</dd>
             <dt className="text-slate-500">Plazo consumido</dt><dd className="text-right font-medium">{pct(c.plazoConsumido)}</dd>
             <dt className="text-slate-500">Días transcurridos / restantes</dt><dd className="text-right">{c.diasTranscurridos} / {c.diasRestantes}</dd>
             <dt className="text-slate-500">Término contractual</dt><dd className="text-right">{fmtFecha(c.terminoContractual - 1)}</dd>
@@ -87,18 +91,18 @@ export default function ObraTower() {
       <div>
         <h2 className="mb-2 text-sm font-semibold text-slate-700">Valor ganado (EVM) y resultado</h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-          <Kpi etiqueta="CPI" valor={idx(c.cpi)} estado={est(c.cpi, u.cpi)} sub="EV / AC" ayuda="Índice de desempeño de costo" />
-          <Kpi etiqueta="SPI" valor={idx(c.spi)} estado={est(c.spi, u.spi)} sub="EV / PV" ayuda="Índice de desempeño de plazo" />
-          <Kpi etiqueta="CV" valor={mm(c.cv)} sub="EV − AC" />
-          <Kpi etiqueta="SV" valor={mm(c.sv)} sub="EV − PV" />
+          <Kpi etiqueta="CPI" valor={idx(c.cpi)} estado={estadoKpi(cfg, 'KCO-03', c.cpi)} sub="EV / AC" ayuda={ayuda('KCO-03', fIdx)} />
+          <Kpi etiqueta="SPI" valor={idx(c.spi)} estado={estadoKpi(cfg, 'KPL-05', c.spi)} sub="EV / PV" ayuda={ayuda('KPL-05', fIdx)} />
+          <Kpi etiqueta="CV" valor={mm(c.cv)} estado={c.bac > 0 ? estadoKpi(cfg, 'KCO-11', c.cv / c.bac) : 'na'} sub="EV − AC" ayuda={ayuda('KCO-11', fPct) + ' del BAC'} />
+          <Kpi etiqueta="SV" valor={mm(c.sv)} estado={c.bac > 0 ? estadoKpi(cfg, 'KCO-12', c.sv / c.bac) : 'na'} sub="EV − PV" ayuda={ayuda('KCO-12', fPct) + ' del BAC'} />
           <Kpi etiqueta="BAC" valor={mm(c.bac)} sub="Presupuesto a término" />
-          <Kpi etiqueta="EAC" valor={mm(c.eac)} sub={`ETC ${mm(c.etc)}`} ayuda="Costo estimado a término" />
-          <Kpi etiqueta="VAC" valor={mm(c.vac)} estado={c.vac < -u.vac[1] * c.bac ? 'rojo' : c.vac < -u.vac[0] * c.bac ? 'amarillo' : 'verde'} sub="BAC − EAC" />
-          <Kpi etiqueta="TCPI" valor={idx(c.tcpi)} sub="Eficiencia requerida" />
+          <Kpi etiqueta="EAC" valor={mm(c.eac)} estado={c.bac > 0 ? estadoKpi(cfg, 'KCO-04', c.eac / c.bac) : 'na'} sub={`ETC ${mm(c.etc)}`} ayuda={ayuda('KCO-04', (v) => `BAC × ${idx(v)}`)} />
+          <Kpi etiqueta="VAC" valor={mm(c.vac)} estado={c.bac > 0 ? estadoKpi(cfg, 'KCO-14', c.vac / c.bac) : 'na'} sub="BAC − EAC" ayuda={ayuda('KCO-14', fPct) + ' del BAC'} />
+          <Kpi etiqueta="TCPI" valor={idx(c.tcpi)} estado={estadoKpi(cfg, 'KCO-15', c.tcpi)} sub="Eficiencia requerida" ayuda={ayuda('KCO-15', fIdx)} />
           <Kpi etiqueta="Margen directo proy." valor={pct(c.margenDirecto)} />
-          <Kpi etiqueta="Margen proyectado" valor={pct(c.margenProyectado)} estado={c.margenProyectado < 0 ? 'rojo' : c.margenProyectado < u.margenMinimo ? 'amarillo' : 'verde'} sub={`Ofertado ${pct(o.margenOfertado, 0)}`} />
-          <Kpi etiqueta="Resultado proyectado" valor={mm(c.resultado)} sub={`Venta ${mm(c.venta)}`} />
-          <Kpi etiqueta="Productividad MO" valor={c.productividadDesv == null ? '—' : `${c.productividadDesv > 0 ? '+' : ''}${pct(c.productividadDesv)}`} sub="HH real vs APU" estado={sem.find((s) => s.dim === 'productividad')?.estado} />
+          <Kpi etiqueta="Margen proyectado" valor={pct(c.margenProyectado)} estado={estadoUmbral(c.margenProyectado, umbralMargen(cfg, o.margenOfertado))} sub={`Ofertado ${pct(o.margenOfertado, 0)}`} ayuda={`Doc 14 KCO-05: ${textoUmbral(umbralMargen(cfg, o.margenOfertado), (v) => pct(v, 0))}`} />
+          <Kpi etiqueta="Resultado proyectado" valor={mm(c.resultado)} estado={estadoUmbral(c.resultado, { objetivo: utilidadOfertada, alerta: utilidadOfertada * 0.5, critico: 0, sentido: 'mayor' })} sub={`Venta ${mm(c.venta)}`} ayuda="Doc 14 KCO-18: meta ≥ utilidad ofertada · alerta < 50 % de la ofertada · crítico < 0" />
+          <Kpi etiqueta="Productividad MO" valor={c.productividadDesv == null ? '—' : `${c.productividadDesv > 0 ? '+' : ''}${pct(c.productividadDesv)}`} sub="HH real vs APU" estado={sem.find((s) => s.dim === 'productividad')?.estado} ayuda={ayuda('KPR-01', (v) => `+${pct(v, 0)}`)} />
         </div>
       </div>
 

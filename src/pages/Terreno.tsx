@@ -8,6 +8,7 @@ import { num, pct } from '../domain/formato'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
 import { ResumenRDO } from './RDO'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function Terreno() {
   const { d, c } = useCalc()
@@ -24,9 +25,10 @@ export default function Terreno() {
       <Titulo sub="Valida avance y HH de los capataces: solo lo validado alimenta el valor ganado y los rendimientos">Validación y rendimientos</Titulo>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi etiqueta="RDO por validar" valor={pendientes.length} estado={pendientes.length > 5 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Días sin RDO (7 días)" valor={c.diasSinRDO.length} estado={c.diasSinRDO.length > 1 ? 'rojo' : c.diasSinRDO.length ? 'amarillo' : 'verde'} sub={c.diasSinRDO.map(fmtFecha).join(', ') || undefined} />
-        <Kpi etiqueta="HH no productivas" valor={pct(c.hhTotal ? c.hhNoProd / c.hhTotal : 0)} sub={`${num(c.hhNoProd)} HH acumuladas`} />
-        <Kpi etiqueta="HH extraordinarias" valor={pct(c.hhTotal ? c.hhExtra / c.hhTotal : 0)} />
+        <Kpi etiqueta="Cumplimiento de RDO (7 días)" valor={c.cumplimientoRDO != null ? pct(c.cumplimientoRDO, 0) : '—'} estado={ek('KPR-05', c.cumplimientoRDO)} ayuda={ayudaKpi('KPR-05')}
+          sub={c.diasSinRDO.length ? `sin RDO: ${c.diasSinRDO.map(fmtFecha).join(', ')}` : 'todos los días hábiles con RDO'} />
+        <Kpi etiqueta="HH no productivas" valor={pct(c.hhTotal ? c.hhNoProd / c.hhTotal : 0)} sub={`${num(c.hhNoProd)} HH acumuladas`} estado={ek('KPR-09', c.hhTotal ? c.hhNoProd / c.hhTotal : null)} ayuda={ayudaKpi('KPR-09')} />
+        <Kpi etiqueta="HH extraordinarias" valor={pct(c.hhTotal ? c.hhExtra / c.hhTotal : 0)} estado={ek('KPR-08', c.hhTotal ? c.hhExtra / c.hhTotal : null)} ayuda={ayudaKpi('KPR-08')} />
       </div>
 
       <Card titulo={`Reportes por validar (${pendientes.length})`}>

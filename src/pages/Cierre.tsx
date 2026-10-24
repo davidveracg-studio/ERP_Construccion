@@ -8,6 +8,7 @@ import { idx, mm, pct } from '../domain/formato'
 import { periodosDe } from '../domain/periodos'
 import { useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { UMBRALES_DOC14 } from '../domain/umbrales'
 
 export default function Cierre() {
   const d = useDatosDominio()
@@ -26,7 +27,7 @@ export default function Cierre() {
     { ok: c.diasSinRDO.length === 0, txt: 'RDO de todos los días hábiles de la semana', det: c.diasSinRDO.length ? `Faltan: ${c.diasSinRDO.map(fmtFecha).join(', ')}` : 'Completo', link: '/rdo' },
     { ok: c.rdoPendientes === 0, txt: 'Avance y HH validados por el jefe de terreno', det: c.rdoPendientes ? `${c.rdoPendientes} RDO sin validar` : 'Todo validado', link: '/terreno' },
     { ok: lote >= corte - 7, txt: 'Costos importados hasta la fecha de corte', det: lote ? `Último costo: ${fmtFecha(lote)}` : 'Sin costos', link: '/importar' },
-    { ok: c.pctNoImputado <= 0.1, txt: 'Costo no imputado ≤ 10% (KCO-08)', det: pct(c.pctNoImputado), link: '/costos' },
+    { ok: c.pctNoImputado <= UMBRALES_DOC14['KCO-08'].alerta, txt: `Costo no imputado ≤ ${pct(UMBRALES_DOC14['KCO-08'].alerta, 0)} (KCO-08)`, det: pct(c.pctNoImputado), link: '/costos' },
     { ok: !d.alertas.some((a) => a.obraId === obraId && a.regla === 'RULE-607' && ['activa', 'reconocida'].includes(a.estado)), txt: 'Inconsistencias costo–avance revisadas (RULE-607)', det: '', link: '/alertas' },
   ]
   const yaCerrado = ultimo && ultimo.fechaCorte >= corte

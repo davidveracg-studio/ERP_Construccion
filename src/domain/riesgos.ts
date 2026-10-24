@@ -2,6 +2,7 @@
 // Ciclo: identificado → en análisis (responsable) → abierto (evaluado) ⇄ en mitigación (plan) →
 // materializado o cerrado. El estado vigente es el último paso del historial a la fecha, igual que
 // en EP y órdenes de cambio; la exposición sale de la última evaluación (probabilidad × impacto).
+import { estadoKpi } from './umbrales'
 import type { CalcObra } from './evm'
 import type { AccionMitigacion, CategoriaRiesgo, Config, Dia, Escala5, EstadoRiesgo, EstadoSemaforo, EvaluacionRiesgo, Riesgo, Rol } from './types'
 
@@ -246,10 +247,10 @@ export function indicadoresRiesgo(riesgos: Riesgo[], c: CalcObra, config: Config
     impactoEstimadoMaterializados: materializados.reduce((s, y) => s + (y.r.evaluaciones.at(-1)?.impactoMonto ?? 0), 0),
     estado: {
       kri02: criticosSinPlan ? 'rojo' : criticos.length ? 'amarillo' : 'verde',
-      kri03: vencidos >= 3 ? 'rojo' : vencidos ? 'amarillo' : 'verde',
+      kri03: estadoKpi(config, 'KRI-03', vencidos),
       kri04: exposicionMonto > contingencia ? 'rojo' : exposicionMonto > contingencia * 0.5 ? 'amarillo' : 'verde',
       kri05: exposicionDias > holgura + 10 ? 'rojo' : exposicionDias >= holgura && exposicionDias > 0 ? 'amarillo' : 'verde',
-      kri06: tasa == null ? 'na' : tasa > 0.5 ? 'rojo' : tasa > 0.3 ? 'amarillo' : 'verde',
+      kri06: estadoKpi(config, 'KRI-06', tasa),
     },
   }
 }

@@ -9,14 +9,14 @@ import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { clp, mm, num, pct, signoPct } from '../domain/formato'
 import {
   accionesParte, CAUSAS_IMPRODUCTIVAS, costoFijo, equiposDeObra, estadoParte, horasImproductivas, horasTrabajadas, indicadoresEquipo, MODALIDAD, PROPIEDAD,
-  puedeEditarEquipos, puedeRegistrarParte, rendimientoEquipo, UTILIZACION_MIN, UTILIZACION_VERDE,
+  puedeEditarEquipos, puedeRegistrarParte, rendimientoEquipo,
 } from '../domain/maquinaria'
-import type { CausaImproductiva, Equipo, EstadoSemaforo } from '../domain/types'
+import type { CausaImproductiva, Equipo } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 const h = (n: number) => `${num(n, n % 1 ? 1 : 0)} h`
-const estUtil = (u: number | null): EstadoSemaforo | undefined => (u == null ? undefined : u >= UTILIZACION_VERDE ? 'verde' : u >= UTILIZACION_MIN ? 'amarillo' : 'rojo')
 const TONO_PARTE = { enviado: 'ambar', validado: 'verde', corregido: 'rojo' } as const
 const ESTADO_PARTE = { enviado: 'Por validar', validado: 'Validado', corregido: 'Devuelto' } as const
 
@@ -43,8 +43,8 @@ export default function Maquinaria() {
       </Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi etiqueta="Equipos en obra" valor={activos.length} sub={`${activos.filter(costoFijo).length} de costo fijo`} />
-        <Kpi etiqueta="Utilización" valor={disp ? pct(trab / disp, 0) : '—'} sub={`KMQ-01 · ${h(trab)} de ${h(disp)}`} estado={estUtil(disp ? trab / disp : null)} />
-        <Kpi etiqueta="Horas improductivas" valor={disp ? pct(imp / disp, 0) : '—'} sub="KMQ-02 · RULE-206 sobre 20 %" estado={disp ? (imp / disp <= 0.1 ? 'verde' : imp / disp <= 0.2 ? 'amarillo' : 'rojo') : undefined} />
+        <Kpi etiqueta="Utilización" valor={disp ? pct(trab / disp, 0) : '—'} sub={`KMQ-01 · ${h(trab)} de ${h(disp)}`} estado={ek('KMQ-01', disp ? trab / disp : null)} ayuda={ayudaKpi('KMQ-01')} />
+        <Kpi etiqueta="Horas improductivas" valor={disp ? pct(imp / disp, 0) : '—'} sub="KMQ-02 · RULE-206 sobre la alerta" estado={ek('KMQ-02', disp ? imp / disp : null)} ayuda={ayudaKpi('KMQ-02')} />
         <Kpi etiqueta="Partes por validar" valor={porValidar} sub="los valida el jefe de terreno" estado={porValidar > 3 ? 'amarillo' : 'verde'} />
       </div>
       <Card titulo="Equipos" accion={<label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />Incluir liberados</label>}>
@@ -65,7 +65,7 @@ export default function Maquinaria() {
                     <tr key={e.id} className="border-b border-slate-100 text-right">
                       <td className="py-2 text-left"><div className="font-medium">{e.codigo} · {e.nombre}</div><div className="text-xs text-slate-500">{PROPIEDAD[e.propiedad]}{liberado ? ` · liberado ${fmtFecha(e.liberado!)}` : ''}</div></td>
                       <td>{clp(e.tarifa.monto)} {MODALIDAD[e.tarifa.modalidad]}</td>
-                      <td className={cx(estUtil(k.utilizacion) === 'rojo' && 'text-crit')}>{k.utilizacion != null ? pct(k.utilizacion, 0) : '—'}</td>
+                      <td className={cx(ek('KMQ-01', k.utilizacion) === 'rojo' && 'text-crit')}>{k.utilizacion != null ? pct(k.utilizacion, 0) : '—'}</td>
                       <td>{k.improductividad != null ? pct(k.improductividad, 0) : '—'}</td>
                       <td>{k.costoHoraReal != null ? clp(Math.round(k.costoHoraReal)) : '—'}{k.desvioCostoHora != null && <div className={cx('text-xs', k.desvioCostoHora > 0.1 ? 'text-crit' : 'text-slate-500')}>{signoPct(k.desvioCostoHora)} vs presup.</div>}</td>
                       <td>{k.consumo != null && e.consumoEstandar ? `${num(k.consumo, 1)} l/h` : '—'}</td>
@@ -150,12 +150,12 @@ export function DetalleEquipo() {
       <Link to="/maquinaria" className="text-sm text-marca">← Maquinaria</Link>
       {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{error}</p>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-        <Kpi etiqueta="Utilización (7 días)" valor={k.utilizacion != null ? pct(k.utilizacion, 0) : '—'} sub={`KMQ-01 · 30 días: ${k30.utilizacion != null ? pct(k30.utilizacion, 0) : '—'}`} estado={estUtil(k.utilizacion)} />
-        <Kpi etiqueta="Improductivas" valor={k.improductividad != null ? pct(k.improductividad, 0) : '—'} sub={k.porCausa[0] ? `KMQ-02 · ${CAUSAS_IMPRODUCTIVAS[k.porCausa[0].causa]}` : 'KMQ-02'} />
+        <Kpi etiqueta="Utilización (7 días)" valor={k.utilizacion != null ? pct(k.utilizacion, 0) : '—'} sub={`KMQ-01 · 30 días: ${k30.utilizacion != null ? pct(k30.utilizacion, 0) : '—'}`} estado={ek('KMQ-01', k.utilizacion)} ayuda={ayudaKpi('KMQ-01')} />
+        <Kpi etiqueta="Improductivas" valor={k.improductividad != null ? pct(k.improductividad, 0) : '—'} sub={k.porCausa[0] ? `KMQ-02 · ${CAUSAS_IMPRODUCTIVAS[k.porCausa[0].causa]}` : 'KMQ-02'} estado={ek('KMQ-02', k.improductividad)} ayuda={ayudaKpi('KMQ-02')} />
         <Kpi etiqueta="Costo hora real" valor={k30.costoHoraReal != null ? clp(Math.round(k30.costoHoraReal)) : '—'} sub={k30.desvioCostoHora != null ? `KMQ-03 · ${signoPct(k30.desvioCostoHora)} vs ${clp(e.costoHoraPresupuesto!)}` : 'KMQ-03'}
-          estado={k30.desvioCostoHora == null ? undefined : k30.desvioCostoHora <= 0 ? 'verde' : k30.desvioCostoHora <= 0.25 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Consumo" valor={k30.consumo != null && e.consumoEstandar ? `${num(k30.consumo, 1)} l/h` : '—'} sub={e.consumoEstandar ? `KMQ-04 · estándar ${e.consumoEstandar} l/h` : 'KMQ-04 · sin combustible'} />
-        <Kpi etiqueta="Disponibilidad mecánica" valor={k30.disponibilidad != null ? pct(k30.disponibilidad, 0) : '—'} sub="KMQ-05 · 30 días" />
+          estado={ek('KMQ-03', k30.desvioCostoHora)} ayuda={ayudaKpi('KMQ-03')} />
+        <Kpi etiqueta="Consumo" valor={k30.consumo != null && e.consumoEstandar ? `${num(k30.consumo, 1)} l/h` : '—'} sub={e.consumoEstandar ? `KMQ-04 · estándar ${e.consumoEstandar} l/h` : 'KMQ-04 · sin combustible'} estado={ek('KMQ-04', k30.desvioConsumo)} ayuda={ayudaKpi('KMQ-04')} />
+        <Kpi etiqueta="Disponibilidad mecánica" valor={k30.disponibilidad != null ? pct(k30.disponibilidad, 0) : '—'} sub="KMQ-05 · 30 días" estado={ek('KMQ-05', k30.disponibilidad)} ayuda={ayudaKpi('KMQ-05')} />
         <Kpi etiqueta="Ocioso (7 días)" valor={costoFijo(e) ? mm(k.costoOcioso) : '—'} sub={costoFijo(e) ? 'costo de horas no trabajadas' : 'se paga por hora trabajada'} />
       </div>
 

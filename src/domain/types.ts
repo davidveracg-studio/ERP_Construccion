@@ -1406,16 +1406,11 @@ export interface Config {
   umbrales: {
     /** Colchón de caja por obra como fracción de su venta (KFI-06): bajo él, amarillo; bajo 0, rojo. */
     cajaColchon?: number
-    spi: [number, number]
-    cpi: [number, number]
-    avancePp: [number, number]
-    productividad: [number, number]
+    /** RULE-605: desvío de costo por partida (media / alta). */
     toleranciaPartida: [number, number]
     montoMinimoAlerta: number
-    rendimientoMO: [number, number]
     avanceVsPlazoPp: [number, number]
     margenMinimo: number
-    vac: [number, number]
     recargoExtra: number
     /** RN-P04: el administrador de obra aprueba OC hasta este monto en UF; sobre él, Gerencia. */
     limiteOcUf?: number
@@ -1429,6 +1424,8 @@ export interface Config {
     charlaObligatoria?: boolean
     /** KSE-01: meta de tasa de frecuencia (accidentes CTP por millón de HH). */
     metaIF?: number
+    /** Ajustes de la empresa a los umbrales del doc 14 §4 por indicador (ver umbrales.ts). */
+    kpi?: Record<string, { objetivo?: number | null; alerta?: number; critico?: number }>
   }
   /** Valor de la UF en pesos para los umbrales expresados en UF. */
   valorUF?: number

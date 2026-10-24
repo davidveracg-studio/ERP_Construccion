@@ -3,6 +3,7 @@
 // liberadas (las de RFI y submittal se liberan solas al responderse o aprobarse). Al cierre de la
 // semana se mide el PPC y se registran las causas de no cumplimiento; el avance logrado se toma de
 // los RDO de la semana.
+import { estadoKpi, UMBRALES_DOC14 } from './umbrales'
 import type { CalcObra } from './evm'
 import { estadoRFI, estadoSubmittal, partidasCriticas } from './documental'
 import { diaSemana, fmtFecha } from './fechas'
@@ -23,10 +24,10 @@ export const TIPOS_RESTRICCION: Record<TipoRestriccion, string> = {
 }
 
 /** Meta de PPC (14 KPL-04): verde ≥ 80 %, rojo < 60 %. */
-export const META_PPC = 0.8
-export const PPC_ROJO = 0.6
+export const META_PPC = UMBRALES_DOC14['KPL-04'].objetivo!
+export const PPC_ROJO = UMBRALES_DOC14['KPL-04'].critico
 /** RULE-113: bajo este PPC la semana se alerta (umbral ámbar de KPL-04). */
-export const PPC_ALERTA = 0.7
+export const PPC_ALERTA = UMBRALES_DOC14['KPL-04'].alerta
 /** RULE-114 / 07 §Ejecución: restricción sin liberar a 48 h del inicio. */
 export const HORAS_AVISO_RESTRICCION = 48
 
@@ -148,7 +149,7 @@ export function ppcSemana(tareas: TareaSemanal[], lunes: Dia, t: Dia): SemanaPPC
   return { lunes, comprometidas: comp.length, cumplidas, ppc: comp.length ? cumplidas / comp.length : null, cerrada: semanaCerrada(lunes, t) }
 }
 
-export const estadoPPC = (ppc: number | null): EstadoSemaforo => (ppc == null ? 'na' : ppc >= META_PPC ? 'verde' : ppc >= PPC_ROJO ? 'amarillo' : 'rojo')
+export const estadoPPC = (ppc: number | null): EstadoSemaforo => estadoKpi(null, 'KPL-04', ppc)
 
 export interface IndicadoresLP {
   /** KPL-04: PPC de la última semana cerrada. */

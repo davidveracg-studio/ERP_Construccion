@@ -103,6 +103,14 @@ export interface CalcObra {
   hhExtra: number
   hhPresAvance: number
   productividadDesv: number | null
+  /** KPR-02: HH presupuestadas para el avance logrado / HH reales (≥ 1 es mejor). */
+  indiceProductividad: number | null
+  /** KPL-13: avance físico real / % de plazo consumido. */
+  indiceAvancePlazo: number | null
+  /** KCO-10: (GG reales − GG presupuestados a la fecha) / GG presupuestados a la fecha. */
+  ggDesviacion: number | null
+  /** KPR-05: días hábiles con RDO / días hábiles de los últimos 7 días. */
+  cumplimientoRDO: number | null
   pctNoImputado: number
   diasSinRDO: Dia[]
   rdoPendientes: number
@@ -205,6 +213,7 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
     q[c.tipo] = q[c.tipo] == null || c.cantidad == null ? null : (q[c.tipo] as number) + c.cantidad
     qTipo.set(c.partidaId, q)
   }
+  const ggReal = ggAc
   ggAc += acNoProd
 
   // --- Compromisos (saldo pendiente) ---
@@ -351,9 +360,8 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
 
   // Días hábiles sin RDO en los últimos 7 días
   const desde = Math.max(obra.fechaInicio, corte - 6)
-  const diasSinRDO = obra.estado === 'en_ejecucion'
-    ? diasHabilesEntre(desde, corte, d.config.diasHabiles).filter((x) => !diasConRDO.has(x))
-    : []
+  const habilesVentana = obra.estado === 'en_ejecucion' ? diasHabilesEntre(desde, corte, d.config.diasHabiles) : []
+  const diasSinRDO = habilesVentana.filter((x) => !diasConRDO.has(x))
   const pctNoImputado = ac > 0 ? acSinImputar / ac : 0
   let problemas = 0
   if (diasSinRDO.length > 1) problemas++
@@ -402,6 +410,10 @@ export function calcularObra(d: Datos, obraId: string, corte: Dia): CalcObra {
     holguraMin,
     hhTotal: hhProductivas + hhNoProd, hhProductivas, hhNoProd, hhExtra, hhPresAvance,
     productividadDesv: hhPresAvance > 0 ? hhRealConPres / hhPresAvance - 1 : null,
+    indiceProductividad: hhRealConPres > 0 ? hhPresAvance / hhRealConPres : null,
+    indiceAvancePlazo: plazoConsumido > 0 ? (bacDir > 0 ? evDir / bacDir : 0) / plazoConsumido : null,
+    ggDesviacion: ggPv > 0 ? ggReal / ggPv - 1 : null,
+    cumplimientoRDO: habilesVentana.length ? 1 - diasSinRDO.length / habilesVentana.length : null,
     pctNoImputado, diasSinRDO, rdoPendientes, confianza,
     lb, actualizado, cpm, cpmLB, avanceAct, hitos,
   } as CalcObra

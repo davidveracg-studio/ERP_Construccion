@@ -10,6 +10,7 @@ import { fmtFecha, hoy } from '../domain/fechas'
 import { mm, num, pct } from '../domain/formato'
 import { anomalias, curvasAprendizaje, diasLluvia, eacMetodos, escenarioCuadrilla, escenarioPropuesta, simularPlazo } from '../domain/predictivo'
 import { useCalc } from '../store/hooks'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function Predictivo() {
   const { d, c } = useCalc()
@@ -25,7 +26,7 @@ export default function Predictivo() {
     <div className="space-y-4">
       <Titulo sub={`${c.obra.nombre} · corte ${fmtFecha(c.corte)} · modelos estadísticos reproducibles (regresión, percentiles, Monte Carlo); sin IA generativa`}>Motor predictivo</Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi etiqueta="Costo a término (EAC)" valor={mm(c.eac)} sub={`por partida · rango de métodos ${mm(eac.minimo ?? 0)} – ${mm(eac.maximo ?? 0)}`} estado={c.eac <= c.bac ? 'verde' : c.eac <= c.bac * 1.03 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="Costo a término (EAC)" valor={mm(c.eac)} sub={`por partida · rango de métodos ${mm(eac.minimo ?? 0)} – ${mm(eac.maximo ?? 0)}`} estado={ek('KCO-04', c.bac > 0 ? c.eac / c.bac : null)} ayuda={ayudaKpi('KCO-04') + ' (EAC / BAC)'} />
         <Kpi etiqueta="Término determinista (CPM)" valor={fmtFecha(c.terminoProyectado - 1)} sub={`+${num(lluvia, 1)} días esperados de lluvia → ${fmtFecha(Math.round(c.terminoProyectado + lluvia) - 1)}`} />
         <Kpi etiqueta="Término P50 / P80 (Monte Carlo)" valor={sim ? fmtFecha(sim.p50 - 1) : '—'} sub={sim ? `P80 ${fmtFecha(sim.p80 - 1)} · ${sim.n} simulaciones` : ''} />
         <Kpi etiqueta="Probabilidad de cumplir el plazo" valor={sim ? pct(sim.probCumplir, 0) : '—'} sub={`contractual ${fmtFecha(c.terminoContractual - 1)}`} estado={sim == null ? undefined : sim.probCumplir >= 0.8 ? 'verde' : sim.probCumplir >= 0.5 ? 'amarillo' : 'rojo'} />

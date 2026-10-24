@@ -9,6 +9,7 @@ import { mm, pct, signoPct } from '../domain/formato'
 import { DIMENSIONES, healthScore, semaforo } from '../domain/semaforo'
 import { useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function Cartera() {
   const d = useDatosDominio()
@@ -28,7 +29,6 @@ export default function Cartera() {
     (s, f) => ({ venta: s.venta + f.c.venta, resultado: s.resultado + f.c.resultado, vac: s.vac + f.c.vac, bac: s.bac + f.c.bac, backlog: s.backlog + f.c.venta * (1 - f.c.avanceReal) }),
     { venta: 0, resultado: 0, vac: 0, bac: 0, backlog: 0 },
   )
-  const u = d.config.umbrales
   const ir = (id: string, ruta: string) => { setObra(id); nav(ruta) }
 
   return (
@@ -38,9 +38,9 @@ export default function Cartera() {
         <Kpi etiqueta="Obras en ejecución" valor={filas.filter((f) => f.o.estado === 'en_ejecucion').length} />
         <Kpi etiqueta="Venta contratada" valor={mm(tot.venta)} sub={`Backlog ${mm(tot.backlog)}`} />
         <Kpi etiqueta="Resultado proyectado" valor={mm(tot.resultado)} sub={`Margen ${pct(tot.venta ? tot.resultado / tot.venta : 0)}`} />
-        {/* Mismos umbrales que la alerta de VAC por obra (RULE-608), sobre el presupuesto de la cartera */}
+        {/* KCO-14 sobre el presupuesto de la cartera: los mismos umbrales que la alerta de VAC por obra (RULE-608) */}
         <Kpi etiqueta="VAC consolidado" valor={mm(tot.vac)} sub={tot.bac ? signoPct(tot.vac / tot.bac) : undefined}
-          estado={tot.vac >= -u.vac[0] * tot.bac ? 'verde' : tot.vac >= -u.vac[1] * tot.bac ? 'amarillo' : 'rojo'} ayuda="Presupuesto − costo estimado a término" />
+          estado={ek('KCO-14', tot.bac ? tot.vac / tot.bac : null)} ayuda={`Presupuesto − costo estimado a término. ${ayudaKpi('KCO-14')} (VAC / BAC)`} />
       </div>
 
       <Card titulo="Semáforo por obra">

@@ -11,13 +11,13 @@ import {
 } from '../domain/estadosPago'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { clp, mm, num, pct } from '../domain/formato'
-import type { EstadoPago, EstadoSemaforo, Generador, LineaEP } from '../domain/types'
+import type { EstadoPago, Generador, LineaEP } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 const IVA = 0.19
 const nombreEP = (e: EstadoPago) => (e.tipo === 'anticipo' ? 'Anticipo' : `EP N° ${e.numero}`)
-const nivel = (v: number | null, [ok, alerta]: [number, number]): EstadoSemaforo | undefined => (v == null ? undefined : v <= ok ? 'verde' : v <= alerta ? 'amarillo' : 'rojo')
 
 export function EtapaBadge({ ep, t }: { ep: EstadoPago; t: number }) {
   const e = etapaEP(ep, t)
@@ -52,10 +52,11 @@ export default function EstadosPago() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Kpi etiqueta="Por aprobar del mandante" valor={ind.porAprobar} />
-        <Kpi etiqueta="Días de preparación" valor={ind.diasPreparacion != null ? num(ind.diasPreparacion, 1) : '—'} estado={nivel(ind.diasPreparacion, [3, 7])} sub="corte → presentación" ayuda="KFI-01: objetivo ≤ 1 día, alerta > 3, crítico > 7" />
-        <Kpi etiqueta="Días de aprobación" valor={ind.diasAprobacion != null ? num(ind.diasAprobacion, 1) : '—'} estado={nivel(ind.diasAprobacion, [15, 30])} sub="presentación → aprobación" ayuda="KFI-02: objetivo ≤ 7 días, alerta > 15, crítico > 30" />
-        <Kpi etiqueta="EP observados" valor={ind.observados != null ? pct(ind.observados, 0) : '—'} estado={nivel(ind.observados, [0.25, 0.5])} ayuda="KFI-10: objetivo ≤ 10 %, alerta > 25 %, crítico > 50 %" />
-        <Kpi etiqueta="Avance por cobrar" valor={mm(c.caja.avanceNoCobrado)} sub="validado sin EP aprobado" />
+        <Kpi etiqueta="Días de preparación" valor={ind.diasPreparacion != null ? num(ind.diasPreparacion, 1) : '—'} estado={ek('KFI-01', ind.diasPreparacion)} sub="corte → presentación" ayuda={ayudaKpi('KFI-01')} />
+        <Kpi etiqueta="Días de aprobación" valor={ind.diasAprobacion != null ? num(ind.diasAprobacion, 1) : '—'} estado={ek('KFI-02', ind.diasAprobacion)} sub="presentación → aprobación" ayuda={ayudaKpi('KFI-02')} />
+        <Kpi etiqueta="EP observados" valor={ind.observados != null ? pct(ind.observados, 0) : '—'} estado={ek('KFI-10', ind.observados)} ayuda={ayudaKpi('KFI-10')} />
+        <Kpi etiqueta="Avance por cobrar" valor={mm(c.caja.avanceNoCobrado)} estado={ek('KFI-04', c.caja.periodosNoCobrados)} ayuda={ayudaKpi('KFI-04')}
+          sub={`validado sin EP aprobado · ${c.caja.periodosNoCobrados != null ? num(c.caja.periodosNoCobrados, 1) : '—'} períodos`} />
       </div>
 
       <Card>

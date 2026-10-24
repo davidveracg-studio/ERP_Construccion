@@ -7,6 +7,7 @@ import { fmtFecha } from './fechas'
 import { calcularObra } from './evm'
 import { costoHHPres, hhPorUnidad, puCosto } from './presupuesto'
 import type { Dia, EstadoLead, EstadoPropuesta, Lead, LineaPropuesta, Propuesta, Recurso, Rol, TipoRecurso } from './types'
+import { UMBRALES_DOC14 } from './umbrales'
 
 export const ESTADOS_LEAD: Record<EstadoLead, string> = {
   nuevo: 'Nuevo', en_estudio: 'En estudio', propuesta_enviada: 'Propuesta enviada', ganado: 'Ganado', perdido: 'Perdido', descartado: 'Descartado',
@@ -28,7 +29,7 @@ export const DIAS_CIERRE = 5
 /** RULE-003: días sin respuesta tras el envío. */
 export const DIAS_SIN_RESPUESTA = 10
 /** KCM-02: meta de tasa de adjudicación. */
-export const META_HIT_RATE = 0.2
+export const META_HIT_RATE = UMBRALES_DOC14['KCM-02'].objetivo as number
 
 const ultimo = <E extends string>(h: { fecha: Dia; estado: E }[], t: Dia) => h.filter((x) => x.fecha <= t).at(-1)?.estado ?? null
 export const estadoLead = (l: Lead, t: Dia): EstadoLead | null => (l.creado > t ? null : ultimo(l.historial, t) ?? 'nuevo')

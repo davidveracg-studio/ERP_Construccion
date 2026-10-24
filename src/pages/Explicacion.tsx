@@ -12,6 +12,7 @@ import { idx, mm, num, pct, pp, signoPct } from '../domain/formato'
 import { periodosDe } from '../domain/periodos'
 import type { Dimension } from '../domain/semaforo'
 import { CAUSAS_NP, type CausaNoProductiva } from '../domain/types'
+import { umbral, type KpiId } from '../domain/umbrales'
 import { useCalc } from '../store/hooks'
 
 const REGLAS_DIM: Record<string, string[]> = {
@@ -29,19 +30,21 @@ export default function Explicacion() {
   const periodos = useMemo(() => (c ? periodosDe(d, c.obra.id).slice(-8) : []), [d, c])
   if (!c) return null
   const celda = sem.find((s) => s.dim === dim)!
-  const u = d.config.umbrales
+  const k = (id: KpiId) => umbral(d.config, id)
   const alertas = d.alertas.filter((a) => a.obraId === c.obra.id && REGLAS_DIM[dim]?.includes(a.regla) && ['activa', 'reconocida', 'en_accion'].includes(a.estado))
 
   const serie = periodos.map((p) =>
     dim === 'costos' ? p.obra.cpi : dim === 'plazo' ? p.obra.spi : dim === 'avance' ? p.obra.avanceReal - p.obra.avancePlan : p.obra.productividadDesv,
   )
-  const umbral = dim === 'costos' ? u.cpi[0] : dim === 'plazo' ? u.spi[0] : dim === 'avance' ? u.avancePp[0] : u.productividad[0]
+  // Umbrales del doc 14 §4 (catálogo único): KCO-03, KPL-05, KPL-03 y KPR-01
+  const cpi = k('KCO-03'), spi = k('KPL-05'), av = k('KPL-03'), prod = k('KPR-01')
+  const linea = dim === 'costos' ? cpi.alerta : dim === 'plazo' ? spi.alerta : dim === 'avance' ? av.alerta : prod.alerta
   const fmt = dim === 'avance' ? pp : dim === 'productividad' ? signoPct : idx
   const porQue = {
-    costos: `CPI ${idx(c.cpi)}: por cada $1 gastado se ha ganado $${idx(c.cpi)} de valor presupuestado. Umbral verde ≥ ${idx(u.cpi[0])}, rojo < ${idx(u.cpi[1])}.`,
-    plazo: `SPI ${idx(c.spi)}: se ha ejecutado ${pct(c.spi)} de lo que la línea base indicaba a la fecha. Umbral verde ≥ ${idx(u.spi[0])}, rojo < ${idx(u.spi[1])}.`,
-    avance: `Avance real ${pct(c.avanceReal)} vs planificado ${pct(c.avancePlan)} (${pp(c.desvAvance)}). Rojo bajo ${pp(u.avancePp[1])}.`,
-    productividad: `Las HH usadas superan en ${signoPct(c.productividadDesv)} a las presupuestadas en el APU para el avance logrado. Rojo sobre ${pct(u.productividad[1], 0)}.`,
+    costos: `CPI ${idx(c.cpi)}: por cada $1 gastado se ha ganado $${idx(c.cpi)} de valor presupuestado. Verde ≥ ${idx(cpi.alerta)}, rojo < ${idx(cpi.critico)} (doc 14 KCO-03).`,
+    plazo: `SPI ${idx(c.spi)}: se ha ejecutado ${pct(c.spi)} de lo que la línea base indicaba a la fecha. Verde ≥ ${idx(spi.alerta)}, rojo < ${idx(spi.critico)} (doc 14 KPL-05).`,
+    avance: `Avance real ${pct(c.avanceReal)} vs planificado ${pct(c.avancePlan)} (${pp(c.desvAvance)}). Amarillo bajo ${pp(av.alerta)}, rojo bajo ${pp(av.critico)} (doc 14 KPL-03).`,
+    productividad: `Las HH usadas superan en ${signoPct(c.productividadDesv)} a las presupuestadas en el APU para el avance logrado. Amarillo sobre ${pct(prod.alerta, 0)}, rojo sobre ${pct(prod.critico, 0)} (doc 14 KPR-01).`,
   }[dim as 'costos']
 
   return (
@@ -63,7 +66,7 @@ export default function Explicacion() {
           <p className="max-w-2xl text-sm text-slate-700">{porQue}</p>
           <div>
             <div className="text-xs text-slate-500">Tendencia últimos {periodos.length} cierres</div>
-            <Sparkline valores={serie} umbral={umbral} formato={fmt} />
+            <Sparkline valores={serie} umbral={linea} formato={fmt} />
             <div className="tabular text-xs text-slate-500">{serie.map((v) => (v == null ? '—' : fmt(v))).join(' → ')}</div>
           </div>
         </div>

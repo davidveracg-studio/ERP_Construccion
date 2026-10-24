@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, cx, inputCls } from '../components/ui'
 import {
-  controlMateriales, DIAS_COBERTURA, indicadoresBodega, INMOVILIZADO_ROJO, INMOVILIZADO_VERDE, puedeMoverStock, signo, stockMaterial, stockObra,
+  controlMateriales, DIAS_COBERTURA, indicadoresBodega, puedeMoverStock, signo, stockMaterial, stockObra,
   TIPOS_MOVIMIENTO, TOLERANCIA_CONSUMO,
 } from '../domain/bodega'
 import { fmtFecha, hoy } from '../domain/fechas'
@@ -13,6 +13,7 @@ import { clp, mm, num, pct, signoPct } from '../domain/formato'
 import type { TipoMovimiento } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 type Pestana = 'stock' | 'movimientos' | 'control'
 const PESTANAS: Record<Pestana, string> = { stock: 'Stock', movimientos: 'Movimientos', control: 'Control por partida' }
@@ -39,7 +40,7 @@ export default function Bodega() {
         {/* KAB-05 se mide al cierre: durante la ejecución es normal tener una o dos semanas de stock */}
         <Kpi etiqueta="Material inmovilizado" valor={ind.inmovilizado != null ? pct(ind.inmovilizado, 1) : '—'}
           sub={c.obra.estado === 'en_ejecucion' ? 'KAB-05 · se evalúa al cierre de la obra' : 'KAB-05 · sobre el costo de materiales'}
-          estado={ind.inmovilizado == null || c.obra.estado === 'en_ejecucion' ? undefined : ind.inmovilizado <= INMOVILIZADO_VERDE ? 'verde' : ind.inmovilizado <= INMOVILIZADO_ROJO ? 'amarillo' : 'rojo'} />
+          estado={ind.inmovilizado == null || c.obra.estado === 'en_ejecucion' ? undefined : ek('KAB-05', ind.inmovilizado)} ayuda={ayudaKpi('KAB-05')} />
         <Kpi etiqueta={`Sin cobertura (${DIAS_COBERTURA} días)`} valor={ind.faltantes.length} sub="RULE-201 · tareas del plan semanal" estado={ind.faltantes.length ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Críticos sin cobertura" valor={ind.criticosSinCobertura} sub="KAB-13" estado={ind.criticosSinCobertura ? 'rojo' : 'verde'} />
         <Kpi etiqueta="Consumo sobre presupuesto" valor={ind.sobreconsumo.length} sub={`RULE-202 · tolerancia ${pct(TOLERANCIA_CONSUMO, 0)}`} estado={ind.sobreconsumo.length ? 'amarillo' : 'verde'} />

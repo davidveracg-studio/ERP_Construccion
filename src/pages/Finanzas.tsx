@@ -16,6 +16,7 @@ import { clp, mm, num, pct } from '../domain/formato'
 import type { DocumentoTributario, EstadoSemaforo } from '../domain/types'
 import { useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi } from '../store/umbralesUI'
 
 export default function Finanzas() {
   const d = useDatosDominio()
@@ -48,7 +49,8 @@ export default function Finanzas() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi etiqueta="Caja mínima 60 días (KFI-06)" valor={mm(caja.minimo60)} estado={caja.estado as EstadoSemaforo} sub={`hoy ${mm(caja.disponibleHoy)} · el mínimo el ${fmtFecha(caja.fechaMinimo60)}`} />
         <Kpi etiqueta="Por cobrar facturado (KFI-11)" valor={mm(cxc.total)} sub={`por facturar ${mm(cxc.montoPorFacturar)} · retenciones ${mm(cxc.retenciones)}`} />
-        <Kpi etiqueta="EP vencidos (KFI-09)" valor={mm(cxc.vencidos)} estado={cxc.vencidos > 0 ? (cxc.items.some((i) => (i.vencidoHace ?? 0) > 30) ? 'rojo' : 'amarillo') : 'verde'} sub={`días de cobro promedio (KFI-03): ${cxc.dso != null ? num(cxc.dso, 0) : '—'}`} />
+        <Kpi etiqueta="EP vencidos (KFI-09)" valor={mm(cxc.vencidos)} estado={cxc.vencidos > 0 ? (cxc.items.some((i) => (i.vencidoHace ?? 0) > 30) ? 'rojo' : 'amarillo') : 'verde'} sub={`días de cobro promedio (KFI-03): ${cxc.dso != null ? num(cxc.dso, 0) : '—'}`}
+          ayuda={`Doc 14 KFI-09: alerta con EP vencidos · crítico si alguno lleva más de 30 días. ${ayudaKpi('KFI-03')}`} />
         <Kpi etiqueta="Por pagar (KFI-13)" valor={mm(cxp.total)} estado={cxp.vencidas > 0 ? (cxp.tramos[2] > 0 ? 'rojo' : 'amarillo') : 'verde'} sub={`${mm(cxp.proximos30)} en 30 días · ${cxp.vencidas ? `vencido ${mm(cxp.vencidas)}` : 'nada vencido'}${cxp.retenidos ? ` · retenido RULE-701 ${mm(cxp.retenidos)}` : ''}`} />
       </div>
       {(porRespuesta > 0 || garantias > 0 || rendiciones > 0) && (

@@ -2,6 +2,7 @@
 // scores, riesgo empresarial, posición en el benchmark, fortalezas y debilidades, las desviaciones de
 // costo más grandes con su causa (13 §8), los riesgos por exposición, recomendaciones automáticas y la
 // proyección de margen, caja y backlog.
+import { estadoKpi } from './umbrales'
 import { benchmark, cartera, indicesOBR, NOMBRES_METRICA, riesgoEmpresarial, scoreEmpresa, nivelScore, type ObraCalc } from './benchmark'
 import { recepcionProvisoria } from './contrato'
 import type { Datos } from './datos'
@@ -73,7 +74,7 @@ function recomendaciones(d: Datos, xs: ObraCalc[], corte: Dia, rendimientos: Ret
   for (const x of xs.filter((y) => y.o.estado === 'en_ejecucion')) {
     if (x.c.extraNoAprobado.length) out.push({ texto: `Gestionar la aprobación de las órdenes de cambio con trabajo ya ejecutado en ${x.o.nombre} (${mm(x.c.extraNoAprobado.reduce((s, e) => s + e.monto, 0))}).`, regla: 'RULE-105' })
     const np = x.c.hhTotal > 0 ? x.c.hhNoProd / x.c.hhTotal : 0
-    if (np > 0.07) out.push({ texto: `Reducir las HH no productivas en ${x.o.nombre} (${pct(np, 1)} de las HH).`, regla: 'KPR' })
+    if (estadoKpi(d.config, 'KPR-09', np) !== 'verde') out.push({ texto: `Reducir las HH no productivas en ${x.o.nombre} (${pct(np, 1)} de las HH).`, regla: 'KPR' })
   }
   for (const x of xs) {
     const prov = recepcionProvisoria(d.recepciones, x.o.id, corte)

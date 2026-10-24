@@ -8,6 +8,7 @@ import { dia, fmtFecha, iso } from '../domain/fechas'
 import { pct } from '../domain/formato'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function Programa() {
   const { d, c } = useCalc()
@@ -51,10 +52,10 @@ export default function Programa() {
       )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi etiqueta="Holgura mínima" valor={`${c.holguraMin ?? '—'} días`} estado={c.holguraMin == null ? 'na' : c.holguraMin > 5 ? 'verde' : c.holguraMin >= 0 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Atraso proyectado" valor={`${c.atrasoProyectado > 0 ? '+' : ''}${c.atrasoProyectado} días`} estado={c.atrasoProyectado > 15 ? 'rojo' : c.atrasoProyectado > 0 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Actividades atrasadas" valor={pct(iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : 0, 0)} sub={`${atrasadas.length} de ${iniciadasODebian.length}`} />
-        <Kpi etiqueta="Críticas atrasadas" valor={criticasAtrasadas.length} estado={criticasAtrasadas.length ? 'rojo' : 'verde'} />
+        <Kpi etiqueta="Holgura mínima" valor={`${c.holguraMin ?? '—'} días`} estado={c.holguraMin == null ? 'na' : ek('KPL-14', c.holguraMin)} ayuda={ayudaKpi('KPL-14')} />
+        <Kpi etiqueta="Atraso proyectado" valor={`${c.atrasoProyectado > 0 ? '+' : ''}${c.atrasoProyectado} días`} estado={ek('KPL-06', c.atrasoProyectado)} ayuda={ayudaKpi('KPL-06')} />
+        <Kpi etiqueta="Actividades atrasadas" valor={pct(iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : 0, 0)} sub={`${atrasadas.length} de ${iniciadasODebian.length}`} estado={ek('KPL-10', iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : null)} ayuda={ayudaKpi('KPL-10')} />
+        <Kpi etiqueta="Críticas atrasadas" valor={criticasAtrasadas.length} estado={ek('KPL-15', criticasAtrasadas.length)} ayuda={ayudaKpi('KPL-15')} />
         <Kpi etiqueta="Término proyectado" valor={fmtFecha(c.terminoProyectado - 1)} sub={`contractual ${fmtFecha(c.terminoContractual - 1)}`} />
       </div>
 
