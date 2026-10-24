@@ -12,7 +12,7 @@ import { num, pct } from '../domain/formato'
 import {
   ACCIONES_TAREA, accionesTarea, avanceReportado, CAUSAS_CNC, estadoPPC, estadoTarea, ESTADOS_TAREA, indicadoresLP, liberacion, lunesDe, META_PPC,
   ppcSemana, semanaCerrada, puedeGestionarRestricciones, puedePlanificar, restriccionesAbiertas, restriccionUrgente, tareaCritica, TIPOS_RESTRICCION, TONO_TAREA,
-  PPC_ROJO, type AccionTarea, type Contexto, type SemanaPPC,
+  PPC_ALERTA, PPC_ROJO, type AccionTarea, type Contexto, type SemanaPPC,
 } from '../domain/lastPlanner'
 import type { CausaNoCumplimiento, TareaSemanal, TipoRestriccion } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
@@ -310,8 +310,12 @@ function GraficoPPC({ serie, semana, onSemana }: { serie: SemanaPPC[]; semana: n
         <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-emerald-500" style={{ bottom: `${META_PPC * 100}%` }}>
           <span className="absolute -top-4 right-0 z-10 rounded bg-white px-1 text-[10px] text-emerald-700">meta {pct(META_PPC, 0)}</span>
         </div>
+        {/* KPL-04 (doc 14 §4): bajo la alerta la barra es ámbar; bajo el crítico, roja */}
+        <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-amber-400" style={{ bottom: `${PPC_ALERTA * 100}%` }}>
+          <span className="absolute -top-4 left-0 z-10 rounded bg-white px-1 text-[10px] text-amber-700">alerta {pct(PPC_ALERTA, 0)}</span>
+        </div>
         <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-red-400" style={{ bottom: `${PPC_ROJO * 100}%` }}>
-          <span className="absolute -top-4 right-0 z-10 rounded bg-white px-1 text-[10px] text-red-600">alerta {pct(PPC_ROJO, 0)}</span>
+          <span className="absolute -top-4 right-0 z-10 rounded bg-white px-1 text-[10px] text-red-600">crítico {pct(PPC_ROJO, 0)}</span>
         </div>
         {serie.map((s, i) => {
           const alto = (s.cerrada ? Math.max(2, (s.ppc ?? 0) * 100) : 100) * crece(i)
