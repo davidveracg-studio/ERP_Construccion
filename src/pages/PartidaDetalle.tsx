@@ -12,6 +12,7 @@ import { puCosto } from '../domain/presupuesto'
 import { TIPOS_RECURSO } from '../domain/types'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function PartidaDetalle() {
   const { id } = useParams()
@@ -38,9 +39,9 @@ export default function PartidaDetalle() {
         <Kpi etiqueta="BAC" valor={mm(cp.bac)} />
         <Kpi etiqueta="AC" valor={mm(cp.ac)} sub={cp.provisionSub ? `incl. provisión ${mm(cp.provisionSub)}` : undefined} />
         <Kpi etiqueta="EV" valor={mm(cp.ev)} />
-        <Kpi etiqueta="CPI" valor={idx(cp.cpi)} estado={cp.cpi == null ? 'na' : cp.cpi >= 0.98 ? 'verde' : cp.cpi >= 0.92 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="CPI" valor={idx(cp.cpi)} estado={cp.cpi == null ? 'na' : ek('KCO-03', cp.cpi)} ayuda={ayudaKpi('KCO-03')} />
         <Kpi etiqueta="EAC" valor={mm(cp.eac)} sub={cp.ajuste ? 'ajuste manual' : 'calculado'} />
-        <Kpi etiqueta="VAC" valor={mm(cp.vac)} estado={cp.vac < 0 ? 'rojo' : 'verde'} />
+        <Kpi etiqueta="VAC" valor={mm(cp.vac)} estado={ek('KCO-14', cp.bac > 0 ? cp.vac / cp.bac : null)} ayuda={ayudaKpi('KCO-14') + ' (VAC / BAC)'} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

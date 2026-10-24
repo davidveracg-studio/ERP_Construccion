@@ -4,10 +4,12 @@ import { Link } from 'react-router'
 import { Gantt } from '../components/Gantt'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, inputCls } from '../components/ui'
 import GuiaFigura from '../components/GuiaFigura'
+import { actividadesAtrasadas } from '../domain/evm'
 import { dia, fmtFecha, iso } from '../domain/fechas'
 import { pct } from '../domain/formato'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 export default function Programa() {
   const { d, c } = useCalc()
@@ -22,10 +24,7 @@ export default function Programa() {
   const lbMap = new Map((c.lb?.actividades ?? []).map((a) => [a.id, a]))
   const pendiente = d.programas.find((p) => p.obraId === c.obra.id && p.tipo === 'lineaBase' && p.estado === 'en_aprobacion')
   const versiones = d.programas.filter((p) => p.obraId === c.obra.id && p.tipo === 'lineaBase').sort((a, b) => b.version - a.version)
-  const noHitos = acts.filter((a) => !a.esHito)
-  const iniciadasODebian = noHitos.filter((a) => a.inicioReal != null || (lbMap.get(a.id)?.inicio ?? Infinity) <= c.corte)
-  const atrasadas = iniciadasODebian.filter((a) => (c.cpm.get(a.id)?.ef ?? 0) > (lbMap.get(a.id)?.fin ?? Infinity))
-  const criticasAtrasadas = atrasadas.filter((a) => c.cpm.get(a.id)?.critica)
+  const { iniciadas: iniciadasODebian, atrasadas, criticas: criticasAtrasadas } = actividadesAtrasadas(c)
   const a = acts.find((x) => x.id === sel)
   const r = a ? c.cpm.get(a.id) : undefined
   const b = a ? lbMap.get(a.id) : undefined
@@ -51,10 +50,10 @@ export default function Programa() {
       )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi etiqueta="Holgura mínima" valor={`${c.holguraMin ?? '—'} días`} estado={c.holguraMin == null ? 'na' : c.holguraMin > 5 ? 'verde' : c.holguraMin >= 0 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Atraso proyectado" valor={`${c.atrasoProyectado > 0 ? '+' : ''}${c.atrasoProyectado} días`} estado={c.atrasoProyectado > 15 ? 'rojo' : c.atrasoProyectado > 0 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Actividades atrasadas" valor={pct(iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : 0, 0)} sub={`${atrasadas.length} de ${iniciadasODebian.length}`} />
-        <Kpi etiqueta="Críticas atrasadas" valor={criticasAtrasadas.length} estado={criticasAtrasadas.length ? 'rojo' : 'verde'} />
+        <Kpi etiqueta="Holgura mínima" valor={`${c.holguraMin ?? '—'} días`} estado={c.holguraMin == null ? 'na' : ek('KPL-14', c.holguraMin)} ayuda={ayudaKpi('KPL-14')} />
+        <Kpi etiqueta="Atraso proyectado" valor={`${c.atrasoProyectado > 0 ? '+' : ''}${c.atrasoProyectado} días`} estado={ek('KPL-06', c.atrasoProyectado)} ayuda={ayudaKpi('KPL-06')} />
+        <Kpi etiqueta="Actividades atrasadas" valor={pct(iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : 0, 0)} sub={`${atrasadas.length} de ${iniciadasODebian.length}`} estado={ek('KPL-10', iniciadasODebian.length ? atrasadas.length / iniciadasODebian.length : null)} ayuda={ayudaKpi('KPL-10')} />
+        <Kpi etiqueta="Críticas atrasadas" valor={criticasAtrasadas.length} estado={ek('KPL-15', criticasAtrasadas.length)} ayuda={ayudaKpi('KPL-15')} />
         <Kpi etiqueta="Término proyectado" valor={fmtFecha(c.terminoProyectado - 1)} sub={`contractual ${fmtFecha(c.terminoContractual - 1)}`} />
       </div>
 

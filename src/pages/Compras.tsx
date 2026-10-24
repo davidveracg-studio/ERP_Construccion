@@ -16,6 +16,7 @@ import { clp, mm, num, pct } from '../domain/formato'
 import type { Material, OrdenCompra, Proveedor, SolicitudMaterial, Urgencia } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 type Pestana = 'solicitudes' | 'ordenes' | 'proveedores' | 'catalogo'
 const PESTANAS: Record<Pestana, string> = { solicitudes: 'Solicitudes', ordenes: 'Órdenes de compra', proveedores: 'Proveedores', catalogo: 'Catálogo de materiales' }
@@ -38,11 +39,11 @@ export default function Compras() {
     <div className="space-y-4">
       <Titulo sub={`${c.obra.nombre} · solicitudes de terreno, órdenes de compra, recepciones y proveedores`}>Compras y abastecimiento</Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-        <Kpi etiqueta="OTIF (90 días)" valor={ind.otif != null ? pct(ind.otif, 0) : '—'} estado={ind.estado} sub={`KAB-06 · ${ind.otifN} entregas`} ayuda="Órdenes entregadas a tiempo y completas / órdenes con entrega debida" />
-        <Kpi etiqueta="Entregas en fecha" valor={ind.enFecha != null ? pct(ind.enFecha, 0) : '—'} sub="KAB-01" />
-        <Kpi etiqueta="Lead time" valor={ind.leadTime != null ? `${num(ind.leadTime, 1)} días` : '—'} sub="KAB-02 · solicitud → recepción" />
-        <Kpi etiqueta="Compras urgentes" valor={ind.urgentes != null ? pct(ind.urgentes, 0) : '—'} sub="KAB-03 · RULE-306 sobre 20 %" estado={ind.urgentes == null ? undefined : ind.urgentes > 0.2 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Fuera de presupuesto" valor={ind.fueraPresupuesto != null ? pct(ind.fueraPresupuesto, 1) : '—'} sub="KAB-09" estado={ind.fueraPresupuesto == null ? undefined : ind.fueraPresupuesto > 0.05 ? 'amarillo' : 'verde'} />
+        <Kpi etiqueta="OTIF (90 días)" valor={ind.otif != null ? pct(ind.otif, 0) : '—'} estado={ek('KAB-06', ind.otif)} sub={`KAB-06 · ${ind.otifN} entregas`} ayuda={`Órdenes entregadas a tiempo y completas / con entrega debida. ${ayudaKpi('KAB-06')}`} />
+        <Kpi etiqueta="Entregas en fecha" valor={ind.enFecha != null ? pct(ind.enFecha, 0) : '—'} sub="KAB-01" estado={ek('KAB-01', ind.enFecha)} ayuda={ayudaKpi('KAB-01')} />
+        <Kpi etiqueta="Lead time" valor={ind.leadTime != null ? `${num(ind.leadTime, 1)} días` : '—'} sub="KAB-02 · solicitud → recepción" estado={ek('KAB-02', ind.leadTime)} ayuda={ayudaKpi('KAB-02')} />
+        <Kpi etiqueta="Compras urgentes" valor={ind.urgentes != null ? pct(ind.urgentes, 0) : '—'} sub="KAB-03 · RULE-306 sobre la alerta" estado={ek('KAB-03', ind.urgentes)} ayuda={ayudaKpi('KAB-03')} />
+        <Kpi etiqueta="Fuera de presupuesto" valor={ind.fueraPresupuesto != null ? pct(ind.fueraPresupuesto, 1) : '—'} sub="KAB-09" estado={ek('KAB-09', ind.fueraPresupuesto)} ayuda={ayudaKpi('KAB-09')} />
         <Kpi etiqueta="Comprado (90 días)" valor={mm(ind.montoComprado)} sub={`${ind.nOC} OC · ${ind.porAprobar} por aprobar`} />
       </div>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200" role="tablist">

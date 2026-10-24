@@ -4,6 +4,7 @@
 // percentiles simulados: el cálculo de la posición es el definitivo; en producción la referencia vendrá
 // del agregado de la red. Los scores (empresa, riesgo, mandante, administrador, subcontratista y
 // proveedor) y los índices OBR se calculan con los datos propios.
+import { estadoKpi, norm, normKpi, umbral } from './umbrales'
 import { consolidarCaja } from './caja'
 import { acreditacion, estadoEPConDocs } from './cumplimiento'
 import { rendimientosReales } from './comercial'
@@ -167,17 +168,8 @@ export function benchmark(d: Datos, xs: ObraCalc[], t: Dia) {
 }
 
 // --- Scores (0–100) ---
-/** crítico → 0, alerta → 60, objetivo → 100 (igual que el Health Score). */
-export function norm(v: number | null | undefined, obj: number, alerta: number, crit: number): number | null {
-  if (v == null || !isFinite(v)) return null
-  const up = obj > crit
-  const s = up ? v : -v
-  const [o, a, k] = up ? [obj, alerta, crit] : [-obj, -alerta, -crit]
-  if (s >= o) return 100
-  if (s >= a) return 60 + (40 * (s - a)) / (o - a)
-  if (s >= k) return (60 * (s - k)) / (a - k)
-  return 0
-}
+/** crítico → 0, alerta → 60, objetivo → 100 (la misma normalización del Health Score, umbrales.ts). */
+export { norm }
 export const promedio = (xs: [number | null, number][]) => {
   const v = xs.filter((x): x is [number, number] => x[0] != null)
   const w = v.reduce((s, x) => s + x[1], 0)
@@ -199,7 +191,7 @@ export function scoreEmpresa(d: Datos, xs: ObraCalc[], t: Dia) {
   const componentes = {
     obras: obras != null ? Math.round(obras) : null,
     liquidez: venta > 0 ? norm(caja.minimo60 / venta, d.config.umbrales.cajaColchon ?? 0.02, 0, -0.05) : null,
-    backlog: norm(meses, 12, 6, 3),
+    backlog: normKpi(d.config, 'KFI-07', meses),
     accidentabilidad: norm(met.accidentabilidad ?? 0, 2.8, 4, 6),
   }
   return {
@@ -222,14 +214,14 @@ export function riesgoEmpresarial(d: Datos, xs: ObraCalc[], t: Dia) {
   const total = [...backlog.values()].reduce((s, v) => s + v, 0)
   const mayor = [...backlog].sort((a, b) => b[1] - a[1])[0]
   const concentracion = total > 0 && mayor ? mayor[1] / total : 0
-  if (concentracion > 0.5) factores.push({ factor: 'Concentración de mandante (KCM-05)', puntos: concentracion > 0.7 ? 2 : 1, detalle: `${mayor![0]}: ${Math.round(concentracion * 100)} % del backlog` })
+  if (estadoKpi(d.config, 'KCM-05', concentracion) !== 'verde') factores.push({ factor: 'Concentración de mandante (KCM-05)', puntos: estadoKpi(d.config, 'KCM-05', concentracion) === 'rojo' ? 2 : 1, detalle: `${mayor![0]}: ${Math.round(concentracion * 100)} % del backlog` })
   const exposicion = d.riesgos.filter((r) => riesgoActivo(r, t)).reduce((s, r) => s + (exposicionRiesgo(r, t)?.monto ?? 0), 0)
   const contingencia = ej.reduce((s, x) => s + Math.max(0, x.c.venta * (x.c.margenProyectado - d.config.umbrales.margenMinimo)), 0)
   if (exposicion > contingencia) factores.push({ factor: 'Exposición de riesgos (KRI-04)', puntos: 2, detalle: 'La exposición supera la contingencia del margen' })
   if (ej.some((x) => x.c.seguridad.ctp > 0 || x.c.seguridad.graveMes)) factores.push({ factor: 'Accidentabilidad', puntos: 2, detalle: 'Accidente con tiempo perdido en el mes' })
   const bloqueados = d.epsSubcontrato.filter((e) => { const sc = d.subcontratos.find((s) => s.id === e.subcontratoId); return sc && estadoEPConDocs(e, sc, d.documentosLaborales, t) === 'bloqueado' }).length
   if (bloqueados > 0) factores.push({ factor: 'Cumplimiento laboral de subcontratistas', puntos: 1, detalle: `${bloqueados} EP retenidos por falta de F30-1` })
-  const vac = ej.filter((x) => x.c.bac > 0 && x.c.vac / x.c.bac < -0.07)
+  const vac = ej.filter((x) => x.c.bac > 0 && estadoKpi(d.config, 'KCO-14', x.c.vac / x.c.bac) === 'rojo')
   if (vac.length) factores.push({ factor: 'Obras con VAC < −7 %', puntos: 2, detalle: vac.map((x) => x.o.nombre).join(', ') })
   const puntos = factores.reduce((s, f) => s + f.puntos, 0)
   return { nivel: puntos <= 1 ? 'Bajo' : puntos <= 3 ? 'Medio' : puntos <= 5 ? 'Alto' : 'Crítico', puntos, factores, concentracion, mandanteMayor: mayor?.[0] ?? null } as const
@@ -249,7 +241,7 @@ export function scoresMandante(d: Datos, xs: ObraCalc[], t: Dia) {
     const resueltas = ocs.filter((o) => ['aprobada_mandante', 'rechazada'].includes(etapaOC(o, t) ?? ''))
     const rechazo = resueltas.length ? resueltas.filter((o) => etapaOC(o, t) === 'rechazada').length / resueltas.length : null
     const margen = ponderado(obras, (x) => x.c.margenProyectado)
-    const comp = { pago: norm(atraso ?? 0, 0, 10, 30), aprobacion: norm(aprob, 7, 15, 30), adicionales: norm(rechazo ?? 0, 0, 0.25, 0.5), margen: norm(margen, 0.11, d.config.umbrales.margenMinimo, 0) }
+    const comp = { pago: norm(atraso ?? 0, 0, 10, 30), aprobacion: norm(aprob, 7, 15, 30), adicionales: norm(rechazo ?? 0, 0, 0.25, 0.5), margen: norm(margen, ponderado(obras, (x) => x.o.margenOfertado) ?? d.config.umbrales.margenMinimo, d.config.umbrales.margenMinimo, 0) }
     return { mandante: m, obras: obras.length, atraso, aprob, rechazo, margen, score: promedio([[comp.pago, 0.35], [comp.aprobacion, 0.25], [comp.adicionales, 0.15], [comp.margen, 0.25]]) }
   }).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
 }
@@ -264,7 +256,7 @@ export function scoresAdministrador(d: Datos, xs: ObraCalc[], t: Dia) {
     const ctp = obras.reduce((s, x) => s + x.c.seguridad.ctp, 0)
     const sinRDO = obras.reduce((s, x) => s + x.c.diasSinRDO.length, 0)
     const epTarde = obras.filter((x) => epAtrasado(d, x.o.id, t) != null).length
-    const comp = { margen: norm(margen, 0, -0.02, -0.06), plazo: norm(spi, 1, 0.9, 0.8), seguridad: ctp ? 30 : 100, rdo: norm(sinRDO, 0, 2, 5), ep: epTarde ? 40 : 100 }
+    const comp = { margen: norm(margen, 0, -0.03, -0.08), plazo: normKpi(d.config, 'KPL-05', spi), seguridad: ctp ? 30 : 100, rdo: norm(sinRDO, 0, 2, 5), ep: epTarde ? 40 : 100 }
     return { administrador: a, obras: obras.map((x) => x.o.nombre), margen, spi, ctp, sinRDO, epTarde, score: promedio([[comp.margen, 0.3], [comp.plazo, 0.25], [comp.seguridad, 0.15], [comp.rdo, 0.15], [comp.ep, 0.15]]) }
   }).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
 }
@@ -286,7 +278,7 @@ export function scoresSubcontratista(d: Datos, t: Dia) {
 export function scoresProveedor(d: Datos, t: Dia) {
   return d.proveedores.filter((p) => !p.esSubcontratista).map((p) => {
     const o = otif(d.ordenesCompra.filter((oc) => oc.proveedorId === p.id), t)
-    return { proveedor: p.nombre, ocs: o.n, otif: o.valor, score: o.valor != null ? Math.round(norm(o.valor, 0.95, 0.88, 0.75)!) : null }
+    return { proveedor: p.nombre, ocs: o.n, otif: o.valor, score: o.valor != null ? Math.round(normKpi(d.config, 'KAB-06', o.valor)!) : null }
   }).filter((x) => x.ocs > 0).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
 }
 
@@ -298,12 +290,12 @@ export function indicesOBR(d: Datos, xs: ObraCalc[], t: Dia) {
     { nombre: 'Presupuesto con APU por recursos', ok: d.partidas.filter((p) => ids.includes(p.obraId)).every((p) => p.recursos.length > 0) },
     { nombre: 'Línea base formal', ok: ej.every((x) => !!x.c.lb) },
     { nombre: 'Avance por cantidades (RDO)', ok: ej.every((x) => x.c.diasSinRDO.length <= 1) },
-    { nombre: 'Costo imputado a partida (≥ 95 %)', ok: ej.every((x) => x.c.pctNoImputado <= 0.05) },
+    { nombre: 'Costo imputado a partida (KCO-08 en meta)', ok: ej.every((x) => x.c.pctNoImputado <= umbral(d.config, 'KCO-08').objetivo!) },
     { nombre: 'Cierre semanal (EVM)', ok: ids.every((id) => d.periodos.some((p) => p.obraId === id && p.fechaCorte > t - 14)) },
     { nombre: 'Forecast por partida revisado', ok: d.ajustes.some((a) => ids.includes(a.obraId)) },
     { nombre: 'Alertas con acción correctiva', ok: d.alertas.some((a) => ids.includes(a.obraId) && a.acciones.length > 0) },
   ]
   const madurez = Math.round((1 + (4 * checks.filter((c) => c.ok).length) / checks.length) * 10) / 10
-  const calidadDatos = promedio(ej.map((x) => [promedio([[norm(x.c.pctNoImputado, 0.02, 0.05, 0.15), 0.4], [norm(x.c.diasSinRDO.length, 0, 2, 5), 0.3], [norm(x.c.rdoPendientes, 2, 6, 15), 0.3]]), x.c.venta] as [number | null, number]))
+  const calidadDatos = promedio(ej.map((x) => [promedio([[normKpi(d.config, 'KCO-08', x.c.pctNoImputado), 0.4], [norm(x.c.diasSinRDO.length, 0, 2, 5), 0.3], [norm(x.c.rdoPendientes, 2, 6, 15), 0.3]]), x.c.venta] as [number | null, number]))
   return { madurez, checks, calidadDatos }
 }

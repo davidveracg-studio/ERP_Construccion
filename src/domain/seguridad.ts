@@ -2,6 +2,7 @@
 // Gestión preventiva (charlas, ART de tareas críticas, inspecciones, observaciones) separada de los
 // resultados (incidentes con investigación, medidas correctivas, IF, IG, accidentabilidad). El RDO no
 // se envía sin la charla del día (RULE-801) ni con avance en una tarea crítica sin ART (RULE-803).
+import { estadoKpi } from './umbrales'
 import type { Datos } from './datos'
 import type { Dia, EstadoIncidente, EstadoSemaforo, Incidente, MedidaCorrectiva, Partida, RDO, Rol, TipoIncidente, TipoTareaCritica } from './types'
 
@@ -118,6 +119,8 @@ export interface IndicadoresSeguridad {
   cuasi: number | null
   /** KSE-08 */
   medidasVencidas: number
+  /** KSE-08 crítico: medidas vencidas hace más de 30 días. */
+  medidasVencidas30: number
   medidasAbiertas: number
   /** KSE-09 */
   diasSinCTP: number
@@ -171,7 +174,6 @@ export function indicadoresSeguridad(d: Pick<Datos, 'rdos' | 'cuadrillas' | 'par
   const insegurasVencibles = obs.filter((o) => !o.segura && (o.plazo < t || (o.cerrada != null && o.cerrada <= t)))
   const charlas = semana.length ? conCharla / semana.length : null
   const art = criticas ? conART / criticas : null
-  const preventivos = Math.min(charlas ?? 1, art ?? 1)
   const graveMes = incMes.some(esGrave)
   return {
     if: hhTrab30 > 0 ? (ctp.length * 1_000_000) / hhTrab30 : null,
@@ -182,6 +184,7 @@ export function indicadoresSeguridad(d: Pick<Datos, 'rdos' | 'cuadrillas' | 'par
     art,
     cuasi: trabProm > 0 ? (incMes.filter((i) => i.tipo === 'cuasi').length / trabProm) * 100 : null,
     medidasVencidas: medidas.filter((m) => medidaVencida(m, t)).length,
+    medidasVencidas30: medidas.filter((m) => medidaVencida(m, t) && t - m.plazo > 30).length,
     medidasAbiertas: medidas.filter((m) => !(m.cumplida && m.cumplida.fecha <= t)).length,
     diasSinCTP: t - ultimoCTP,
     inspecciones: insp.length ? insp.filter((i) => i.realizada && i.realizada.fecha <= t).length / insp.length : null,
@@ -194,7 +197,8 @@ export function indicadoresSeguridad(d: Pick<Datos, 'rdos' | 'cuadrillas' | 'par
     hhTrab30,
     trabProm,
     incidentesAbiertos: incs.filter((i) => estadoIncidente(i, t) !== 'cerrado').length,
-    // Semáforo (14 §5.3): ≥ 1 CTP o grave → rojo; 0 CTP con preventivos < 95 % → amarillo
-    estado: !rdos.length ? 'na' : ctp.length > 0 || graveMes ? 'rojo' : preventivos < 0.95 ? 'amarillo' : 'verde',
+    // Semáforo (14 §4.4 KSE-12): grave o fatal → rojo (crítico); ≥ 1 CTP → amarillo (alerta); también
+    // amarillo si los preventivos (charlas KSE-05, ART KSE-06) cruzan su alerta
+    estado: !rdos.length ? 'na' : graveMes ? 'rojo' : ctp.length > 0 || estadoKpi(null, 'KSE-05', charlas) !== 'verde' || estadoKpi(null, 'KSE-06', art) !== 'verde' ? 'amarillo' : 'verde',
   }
 }

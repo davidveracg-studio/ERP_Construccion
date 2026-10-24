@@ -33,7 +33,8 @@ describe('Caja: estados de pago', () => {
     const total = [...yaIncluido, ...lineas].reduce((s, l) => s + l.monto, 0)
     const c = calcularObra(d, 'obra_aromos', HOY - 1)
     const valorizado = c.partidas.reduce((s, cp) => s + cp.cantEjec * cp.p.puVenta, 0)
-    expect(total).toBeLessThanOrEqual(valorizado + 1)
+    // Cada línea se redondea al peso
+    expect(total).toBeLessThanOrEqual(valorizado + yaIncluido.length + lineas.length)
   })
 })
 

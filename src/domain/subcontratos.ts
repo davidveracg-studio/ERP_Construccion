@@ -3,6 +3,7 @@
 // período → retención → pago. El saldo es compromiso (un compromiso por partida, como los importados) y
 // cada EP aprobado genera el costo real de sus partidas. La acreditación y el bloqueo por F30-1 (RULE-701/
 // 702) llegan con la documentación laboral (paquete J).
+import { UMBRALES_DOC14 } from './umbrales'
 import type { CalcObra } from './evm'
 import type { Config, Dia, EPSubcontrato, EstadoEPSub, EstadoSubcontrato, RDO, Rol, Subcontrato } from './types'
 
@@ -19,9 +20,9 @@ export const TONO_EPSUB: Record<EstadoEPSub, 'gris' | 'azul' | 'ambar' | 'verde'
   borrador: 'gris', presentado: 'ambar', validado: 'azul', aprobado: 'azul', bloqueado: 'rojo', pagado: 'verde', rechazado: 'gris',
 }
 
-/** KSU-08: adicionales sobre el monto original (verde ≤ 5 %, rojo > 20 %). */
-export const ADICIONALES_AMBAR = 0.1
-export const ADICIONALES_ROJO = 0.2
+/** KSU-08 (doc 14): alerta > 10 %, crítico > 20 % de adicionales sobre el monto original. */
+export const ADICIONALES_AMBAR = UMBRALES_DOC14['KSU-08'].alerta
+export const ADICIONALES_ROJO = UMBRALES_DOC14['KSU-08'].critico
 
 export const limiteSubcontrato = (cfg: Config) => (cfg.umbrales.limiteSubcontratoUf ?? 500) * (cfg.valorUF ?? 40_000)
 

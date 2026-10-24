@@ -8,7 +8,7 @@ import { calcularObra } from '../domain/evm'
 import { dia, fmtFecha, hoy, iso } from '../domain/fechas'
 import { clp, mm, num, pct } from '../domain/formato'
 import {
-  ACCIONES_EPSUB, ACCIONES_SUB, accionesEPSub, accionesSub, ADICIONALES_AMBAR, ADICIONALES_ROJO, avanceValidado, cobradoPartida, epsDe, estadoEPSub,
+  ACCIONES_EPSUB, ACCIONES_SUB, accionesEPSub, accionesSub, avanceValidado, cobradoPartida, epsDe, estadoEPSub,
   estadoSub, ESTADOS_EPSUB, ESTADOS_SUB, excesosRULE703, indicadoresSub, limiteSubcontrato, montosEPSub, pesoSubcontratos, puedeCrearSubcontrato,
   puedeEditarSubcontratistas, requiereGerenciaSub, TONO_SUB, type AccionEPSub, type AccionSub,
 } from '../domain/subcontratos'
@@ -17,6 +17,7 @@ import { useCalc, useDatosDominio } from '../store/hooks'
 import { acreditacion, estadoEPConDocs, indicadoresCumplimiento, periodo, periodoAnterior } from '../domain/cumplimiento'
 import { DocumentacionLaboral, EstadoEPDocsBadge } from './Cumplimiento'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 const q = (n: number) => num(n, Math.abs(n % 1) > 0.0001 ? 2 : 0)
 export function EstadoSubBadge({ sc, t }: { sc: Subcontrato; t: number }) {
@@ -47,14 +48,14 @@ export default function Subcontratos() {
         Subcontratos
       </Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi etiqueta="Cumplimiento documental" valor={cum.alDia != null ? pct(cum.alDia, 0) : '—'} sub={`KSU-01 · ${cum.porRevisar} documento(s) por revisar`} estado={cum.alDia == null ? undefined : cum.alDia >= 1 ? 'verde' : cum.alDia >= 0.8 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="Cumplimiento documental" valor={cum.alDia != null ? pct(cum.alDia, 0) : '—'} sub={`KSU-01 · ${cum.porRevisar} documento(s) por revisar`} estado={ek('KSU-01', cum.alDia)} ayuda={ayudaKpi('KSU-01')} />
         <Kpi etiqueta="EP bloqueados" valor={cum.bloqueados} sub="KSU-02 · RULE-701, falta F30-1" estado={cum.bloqueados ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Documentos por vencer" valor={cum.porVencer} sub="F30 y documentos de trabajadores" estado={cum.porVencer ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Monto vigente" valor={mm(suma((i) => i.vigente))} sub={`${lista.length} subcontratos`} />
         <Kpi etiqueta="Pagado" valor={mm(suma((i) => i.pagado))} sub={`aprobado ${mm(suma((i) => i.aprobado))}`} />
         <Kpi etiqueta="Saldo contractual" valor={mm(suma((i) => i.saldo))} sub="KSU-05 · es compromiso" />
         <Kpi etiqueta="Retención acumulada" valor={mm(suma((i) => i.retencion))} sub="RULE-704 · se devuelve al cierre" />
-        <Kpi etiqueta="Adicionales" valor={adic != null ? pct(adic, 1) : '—'} sub="KSU-08 · sobre lo contratado" estado={adic == null ? undefined : adic > ADICIONALES_ROJO ? 'rojo' : adic > ADICIONALES_AMBAR ? 'amarillo' : 'verde'} />
+        <Kpi etiqueta="Adicionales" valor={adic != null ? pct(adic, 1) : '—'} sub="KSU-08 · sobre lo contratado" estado={ek('KSU-08', adic)} ayuda={ayudaKpi('KSU-08')} />
         <Kpi etiqueta="Peso de subcontratos" valor={peso != null ? pct(peso, 0) : '—'} sub="KSU-04 · del costo real" />
       </div>
       <div className="flex gap-1 border-b border-slate-200" role="tablist">
@@ -235,8 +236,8 @@ export function DetalleSubcontrato() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Kpi etiqueta="Monto vigente" valor={mm(i.vigente)} sub={`original ${mm(i.original)}`} />
         <Kpi etiqueta="Avance validado" valor={i.avance != null ? pct(i.avance, 0) : '—'} sub={i.avanceVsPrograma != null ? `KSU-03 · ${pct(i.avanceVsPrograma, 0)} del programa` : 'KSU-03'}
-          estado={i.avanceVsPrograma == null ? undefined : i.avanceVsPrograma >= 1 ? 'verde' : i.avanceVsPrograma >= 0.8 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Pagado vs avance" valor={i.pagadoVsAvance != null ? pct(i.pagadoVsAvance, 0) : '—'} sub="KSU-06" estado={i.pagadoVsAvance == null ? undefined : i.pagadoVsAvance <= 1 ? 'verde' : 'amarillo'} />
+          estado={ek('KSU-03', i.avanceVsPrograma)} ayuda={ayudaKpi('KSU-03')} />
+        <Kpi etiqueta="Pagado vs avance" valor={i.pagadoVsAvance != null ? pct(i.pagadoVsAvance, 0) : '—'} sub="KSU-06" estado={ek('KSU-06', i.pagadoVsAvance)} ayuda="Doc 14 KSU-06: objetivo ≤ 100 % · alerta sobre 100 % (el doc no define crítico)" />
         <Kpi etiqueta="Saldo contractual" valor={mm(i.saldo)} sub={`pagado ${mm(i.pagado)} · KSU-05`} />
         <Kpi etiqueta="Retención" valor={mm(i.retencion)} sub={sc.retencionDevuelta != null ? `devuelta ${fmtFecha(sc.retencionDevuelta)}` : `${pct(sc.retencion, 0)} de cada EP`} />
         <Kpi etiqueta="Multas y descuentos" valor={mm(i.descuentosMultas)} sub={i.multasDescuentos != null ? `KSU-07 · ${pct(i.multasDescuentos, 1)}` : 'KSU-07'} />

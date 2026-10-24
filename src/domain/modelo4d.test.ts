@@ -86,14 +86,15 @@ describe('Modelo 4D: avance y estado', () => {
     expect([...linea.real(linea.fin).values()].every((v) => v >= 0.999)).toBe(true)
   })
 
-  it('marca elementos atrasados en la demo y lista actividades en curso', () => {
+  it('la demo está al día (sin elementos críticos) y lista actividades en curso', () => {
     const d = generarDemo(HOY)
     const c = calcularObra(d, 'obra_aromos', HOY)
     const linea = lineaTiempo4D(d, c)
     const els = elementosDe(inferirModelo(linea.actividades), linea.actividades)
     const estados = estadoElementos(els, linea, HOY, c)
     expect(estados.some((e) => e.estado === 'terminado')).toBe(true)
-    expect(estados.some((e) => e.estado === 'atrasado' || e.estado === 'critico')).toBe(true)
+    expect(estados.some((e) => e.estado === 'al_dia')).toBe(true)
+    expect(estados.filter((e) => e.estado === 'critico')).toEqual([])
     const enCurso = actividadesEnCurso(linea, HOY, c)
     expect(enCurso.length).toBeGreaterThan(0)
     expect(enCurso[0].real - enCurso[0].plan).toBeLessThanOrEqual(enCurso[enCurso.length - 1].real - enCurso[enCurso.length - 1].plan)

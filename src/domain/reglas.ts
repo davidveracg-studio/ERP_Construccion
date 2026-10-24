@@ -1,4 +1,5 @@
 // Reglas del núcleo de alerta temprana (12). Se evalúan al cerrar el período de control.
+import { umbral, type KpiId } from './umbrales'
 import type { Datos } from './datos'
 import type { CalcObra } from './evm'
 import { estadoGarantia, estadoObligacion, multaDevengada, OBJETOS_GARANTIA, TIPOS_GARANTIA } from './contrato'
@@ -87,6 +88,7 @@ export const NOMBRES_REGLA: Record<string, string> = {
 
 export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl): Candidata[] {
   const u = d.config.umbrales
+  const k = (id: KpiId) => umbral(d.config, id)
   const o = c.obra
   const out: Candidata[] = []
 
@@ -102,9 +104,10 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
     })
 
   // RULE-106
-  if (c.spi != null && c.spi < u.spi[0])
+  const uSpi = k('KPL-05')
+  if (c.spi != null && c.spi < uSpi.alerta)
     out.push({
-      regla: 'RULE-106', clave: 'RULE-106', severidad: c.spi < u.spi[1] ? 'alta' : 'media',
+      regla: 'RULE-106', clave: 'RULE-106', severidad: c.spi < uSpi.critico ? 'alta' : 'media',
       titulo: `Obra atrasada: SPI ${idx(c.spi)}`, entidad: o.nombre,
       datos: [
         { etiqueta: 'SPI', valor: idx(c.spi) },
@@ -112,7 +115,7 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         { etiqueta: 'Atraso proyectado', valor: `${c.atrasoProyectado} días` },
         { etiqueta: 'Multa potencial', valor: mm(Math.max(0, c.atrasoProyectado) * o.multaDiaria) },
       ],
-      porQue: `SPI ${idx(c.spi)} < umbral ${idx(u.spi[0])}.`,
+      porQue: `SPI ${idx(c.spi)} bajo la alerta de ${idx(uSpi.alerta)} (crítico ${idx(uSpi.critico)}, doc 14 KPL-05).`,
       queExplica: paretoActividades(c).slice(0, 3).map((a) => `${a.etiqueta} (+${a.atraso} d${a.critica ? ', crítica' : ''})`).join(' · ') || undefined,
       accionRequerida: 'Plan de recuperación (refuerzo de cuadrillas, turnos, secuencia) o solicitud de aumento de plazo si la causa es imputable al mandante.',
       responsable: o.administrador, kpi: 'spi', valorKpi: c.spi,
@@ -184,19 +187,19 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
 
   // RULE-110
   const noProd = c.hhTotal > 0 ? c.hhNoProd / c.hhTotal : 0
-  if (noProd > 0.15)
+  if (noProd > k('KPR-09').critico)
     out.push({
       regla: 'RULE-110', clave: 'RULE-110', severidad: 'media',
       titulo: `HH no productivas ${pct(noProd)}`, entidad: o.nombre,
       datos: [{ etiqueta: 'HH no productivas', valor: num(c.hhNoProd) }, { etiqueta: 'HH totales', valor: num(c.hhTotal) }],
-      porQue: 'Más de 15% de las HH registradas no se imputan a partidas.',
+      porQue: `Más del ${pct(k('KPR-09').critico, 0)} de las HH registradas no son productivas (crítico de KPR-09).`,
       accionRequerida: 'Revisar causas (esperas, clima) y registro de HH por partida.',
       responsable: o.jefeTerreno,
     })
 
   for (const cp of c.partidas) {
     const p = cp.p
-    // RULE-304
+    // RULE-304 (doc 12): real + comprometido sobre el presupuesto de la partida con obra pendiente
     if (cp.ac + cp.comprometido > cp.bac * 1.0 && cp.avance < 0.9 && cp.bac > 0)
       out.push({
         regla: 'RULE-304', clave: `RULE-304|${p.id}`, severidad: 'alta',
@@ -270,11 +273,12 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
     const p = lista[0].partida!
     if (cant <= 0) continue
     const desv = hh / cant / pres - 1
-    if (desv <= u.rendimientoMO[0]) continue
+    const uRend = k('KPR-01')
+    if (desv <= uRend.alerta) continue
     const cp = c.partidas.find((x) => x.p.id === pid)
     const restante = cp ? Math.max(0, cp.p.cantidad - cp.cantEjec) * pres * desv * costoHHPres(p) : 0
     out.push({
-      regla: 'RULE-606', clave: `RULE-606|${pid}`, severidad: desv > u.rendimientoMO[1] ? 'alta' : 'media',
+      regla: 'RULE-606', clave: `RULE-606|${pid}`, severidad: desv > uRend.critico ? 'alta' : 'media',
       titulo: `Rendimiento MO: ${p.codigo} ${p.descripcion}`, entidad: p.descripcion,
       datos: [
         { etiqueta: 'Rendimiento real (2 sem.)', valor: `${num(hh / cant, 2)} HH/${p.unidad}` },
@@ -305,20 +309,22 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
     })
 
   // RULE-602 (dos períodos consecutivos)
-  if (c.cpi != null && c.cpi < u.cpi[0] && (anterior?.obra.cpi ?? 1) < u.cpi[0])
+  const uCpi = k('KCO-03')
+  if (c.cpi != null && c.cpi < uCpi.alerta && (anterior?.obra.cpi ?? 1) < uCpi.alerta)
     out.push({
-      regla: 'RULE-602', clave: 'RULE-602', severidad: c.cpi < u.cpi[1] ? 'alta' : 'media',
+      regla: 'RULE-602', clave: 'RULE-602', severidad: c.cpi < uCpi.critico ? 'alta' : 'media',
       titulo: `CPI ${idx(c.cpi)} por segundo período`, entidad: o.nombre,
       datos: [{ etiqueta: 'CPI actual', valor: idx(c.cpi) }, { etiqueta: 'CPI anterior', valor: idx(anterior?.obra.cpi) }],
-      porQue: `CPI bajo ${idx(u.cpi[0])} dos períodos seguidos.`,
+      porQue: `CPI bajo la alerta de ${idx(uCpi.alerta)} dos períodos seguidos (crítico ${idx(uCpi.critico)}, doc 14 KCO-03).`,
       accionRequerida: 'Revisar partidas con mayor desviación y rendimientos de MO.',
       responsable: o.administrador, kpi: 'cpi', valorKpi: c.cpi,
     })
 
   // RULE-608
-  if (c.bac > 0 && c.vac < -u.vac[0] * c.bac)
+  const uVac = k('KCO-14')
+  if (c.bac > 0 && c.vac < uVac.alerta * c.bac)
     out.push({
-      regla: 'RULE-608', clave: 'RULE-608', severidad: c.vac < -u.vac[1] * c.bac ? 'critica' : 'alta',
+      regla: 'RULE-608', clave: 'RULE-608', severidad: c.vac < uVac.critico * c.bac ? 'critica' : 'alta',
       titulo: `VAC de la obra ${mm(c.vac)}`, entidad: o.nombre,
       datos: [
         { etiqueta: 'BAC', valor: mm(c.bac) },
@@ -592,9 +598,10 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
     })
   }
   // RULE-111: rework rate de la semana sobre el umbral
-  if (c.calidad.reworkRate != null && c.calidad.reworkRate > 0.03)
+  const uRw = k('KCA-07')
+  if (c.calidad.reworkRate != null && c.calidad.reworkRate > uRw.alerta)
     out.push({
-      regla: 'RULE-111', clave: 'RULE-111', severidad: c.calidad.reworkRate > 0.06 ? 'alta' : 'media', titulo: `Rework rate de ${pct(c.calidad.reworkRate)} en la semana`, entidad: o.nombre,
+      regla: 'RULE-111', clave: 'RULE-111', severidad: c.calidad.reworkRate > uRw.critico ? 'alta' : 'media', titulo: `Rework rate de ${pct(c.calidad.reworkRate)} en la semana`, entidad: o.nombre,
       datos: [{ etiqueta: 'HH de retrabajo (7 días)', valor: num(c.calidad.hhRetrabajo7, 0) }, { etiqueta: 'NCR abiertas', valor: String(c.calidad.ncrAbiertas) }],
       porQue: 'Las HH de retrabajo empeoran el rendimiento, suman al costo de no calidad y consumen holgura.',
       accionRequerida: 'Revisar las NCR asociadas y la causa raíz con la cuadrilla o subcontratista.',
@@ -668,7 +675,7 @@ export function evaluarReglas(d: Datos, c: CalcObra, anterior?: PeriodoControl):
         { etiqueta: 'Cumplidas / comprometidas', valor: `${lp.ultima.cumplidas} / ${lp.ultima.comprometidas}` },
         ...(lp.causas[0] ? [{ etiqueta: 'Causa principal (8 semanas)', valor: `${CAUSAS_CNC[lp.causas[0].causa]} (${lp.causas[0].n})` }] : []),
       ],
-      porQue: 'Menos del 70 % de lo comprometido en la reunión semanal se cumplió.',
+      porQue: `Menos del ${pct(PPC_ALERTA, 0)} de lo comprometido en la reunión semanal se cumplió (alerta de KPL-04).`,
       queProvoca: 'Un plan que no se cumple deja de ser confiable: el avance real se aleja del programa y se pierde productividad.',
       accionRequerida: 'Revisar las causas de no cumplimiento en la reunión semanal y comprometer solo tareas sin restricciones.',
       responsable: o.jefeTerreno, kpi: 'KPL-04', valorKpi: lp.ultima.ppc,

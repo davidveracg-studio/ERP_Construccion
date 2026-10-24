@@ -3,6 +3,7 @@
 // (RN-P04) → recepciones parciales o totales con guía. El saldo pendiente de las OC aprobadas suma al
 // comprometido de la partida (evm.ts) y cada recepción genera el costo real (store). OTIF, lead time y
 // cumplimiento de fecha salen de las recepciones.
+import { estadoKpi, UMBRALES_DOC14 } from './umbrales'
 import type {
   Config, Dia, EstadoOC, EstadoSemaforo, EstadoSolicitud, LineaOC, OrdenCompra, Proveedor, Rol, SolicitudMaterial,
 } from './types'
@@ -23,13 +24,13 @@ export const TONO_SOLICITUD: Record<EstadoSolicitud, 'gris' | 'azul' | 'ambar' |
 }
 export const codigoOC = (oc: Pick<OrdenCompra, 'numero'>) => `OC-${String(oc.numero).padStart(4, '0')}`
 
-/** Meta de OTIF del semáforo de Compras (14 §5.3): verde ≥ 95 %, rojo < 88 %. */
-export const OTIF_VERDE = 0.95
-export const OTIF_ROJO = 0.88
+/** KAB-06 (14 §4.7): alerta < 90 %, crítico < 80 % (ver umbrales.ts). */
+export const OTIF_VERDE = UMBRALES_DOC14['KAB-06'].alerta
+export const OTIF_ROJO = UMBRALES_DOC14['KAB-06'].critico
 /** RULE-305: OTIF móvil de 90 días del proveedor bajo 85 % (con al menos 3 OC). */
 export const OTIF_PROVEEDOR_MIN = 0.85
-/** RULE-306: compras urgentes del último mes sobre 20 % (con al menos 5 OC). */
-export const URGENTES_MAX = 0.2
+/** RULE-306: compras urgentes del último mes sobre la alerta de KAB-03 (con al menos 5 OC). */
+export const URGENTES_MAX = UMBRALES_DOC14['KAB-03'].alerta
 export const VENTANA_DIAS = 90
 
 export const valorUF = (cfg: Config) => cfg.valorUF ?? 40_000
@@ -195,7 +196,7 @@ export function otif(ocs: OrdenCompra[], t: Dia, ventana = VENTANA_DIAS): { valo
   return { valor: ev.length ? ok / ev.length : null, n: ev.length, ok }
 }
 
-export const estadoOTIF = (v: number | null): EstadoSemaforo => (v == null ? 'na' : v >= OTIF_VERDE ? 'verde' : v >= OTIF_ROJO ? 'amarillo' : 'rojo')
+export const estadoOTIF = (v: number | null): EstadoSemaforo => estadoKpi(null, 'KAB-06', v)
 
 export interface IndicadoresCompras {
   /** KAB-06 (semáforo Compras), 90 días. */

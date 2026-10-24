@@ -80,6 +80,11 @@ export interface ResumenCaja {
   porPagar30: number
   /** KFI-04: avance valorizado validado no cubierto por EP aprobados. */
   avanceNoCobrado: number
+  /**
+   * KFI-04 en períodos: avance no cobrado / producción valorizada de los últimos 30 días (un período de EP
+   * mensual), con piso en la mitad del ritmo medio del contrato para obras que recién parten.
+   */
+  periodosNoCobrados: number | null
   retenciones: MovRetencion[]
   semanas: SemanaCaja[]
 }
@@ -240,6 +245,14 @@ export function calcularCaja(d: Datos, c: CalcObra): ResumenCaja {
   return {
     condiciones: cond, movimientos: movs, capital, saldoHoy, disponibleHoy, minimo60, fechaMinimo60, colchon, estado,
     cxc, cxcVencida, epVencidos, porPagar30, avanceNoCobrado: Math.max(0, valReal - aprobado), retenciones,
+    periodosNoCobrados: (() => {
+      // Un período = lo producido (valorizado a precio de venta) en los últimos 30 días, con piso en el ritmo medio del contrato
+      let hace30 = 0
+      for (const r of d.rdos) if (r.obraId === obra.id && r.estado === 'validado' && r.fecha > T - 30 && r.fecha <= T)
+        for (const a of r.avances) hace30 += a.cantidad * (puVenta.get(a.partidaId) ?? 0)
+      const periodo = Math.max(hace30, obra.plazoDias > 0 ? (venta * 30) / obra.plazoDias / 2 : 0)
+      return periodo > 0 ? Math.max(0, valReal - aprobado) / periodo : null
+    })(),
     semanas: semanasDe(movs, obra.fechaInicio, T, capital, retenciones),
   }
 }
@@ -292,6 +305,7 @@ export function consolidarCaja(cajas: ResumenCaja[], corte: Dia): Omit<ResumenCa
     epVencidos: cajas.flatMap((c) => c.epVencidos),
     porPagar30: cajas.reduce((s, c) => s + c.porPagar30, 0),
     avanceNoCobrado: cajas.reduce((s, c) => s + c.avanceNoCobrado, 0),
+    periodosNoCobrados: null,
     retenciones: cajas.flatMap((c) => c.retenciones),
     semanas: semanasDe(movimientos, inicio, corte, capital, cajas.flatMap((c) => c.retenciones)),
   }

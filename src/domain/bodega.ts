@@ -2,6 +2,7 @@
 // 14 KAB-05/10/11/13). El stock sale de movimientos inmutables y se valoriza a costo promedio. Cada
 // recepción de OC es una entrada (el costo real ya se registró al recibir); la salida a partida mide el
 // consumo físico. La cobertura cruza lo que piden las tareas del plan semanal con stock + OC en curso.
+import { UMBRALES_DOC14 } from './umbrales'
 import type { CalcObra } from './evm'
 import { estadoOC, pendienteLinea, recibidoLinea } from './compras'
 import { estadoTarea } from './lastPlanner'
@@ -9,12 +10,12 @@ import type { Compromiso, Dia, Material, MovimientoStock, OrdenCompra, Partida, 
 
 export const TIPOS_MOVIMIENTO: Record<TipoMovimiento, string> = { entrada: 'Entrada', salida: 'Salida a partida', traspaso: 'Traspaso a otra obra', merma: 'Merma', ajuste: 'Ajuste de inventario' }
 /** RULE-202: tolerancia del consumo sobre lo presupuestado según avance. */
-export const TOLERANCIA_CONSUMO = 0.05
+export const TOLERANCIA_CONSUMO = UMBRALES_DOC14['KCO-07'].alerta
 /** RULE-201 / KAB-13: horizonte de cobertura de las tareas por iniciar. */
 export const DIAS_COBERTURA = 7
 /** KAB-05: material inmovilizado sobre el costo de materiales. */
-export const INMOVILIZADO_VERDE = 0.02
-export const INMOVILIZADO_ROJO = 0.1
+export const INMOVILIZADO_VERDE = UMBRALES_DOC14['KAB-05'].objetivo!
+export const INMOVILIZADO_ROJO = UMBRALES_DOC14['KAB-05'].critico
 
 export const puedeMoverStock = (rol: Rol) => rol === 'R07'
 

@@ -14,6 +14,7 @@ import { clp, mm, num, pct, uid } from '../domain/formato'
 import type { Cliente, EstadoLead, Lead, LineaPropuesta, Propuesta } from '../domain/types'
 import { useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 const COLUMNAS: EstadoLead[] = ['nuevo', 'en_estudio', 'propuesta_enviada', 'ganado']
 
@@ -44,7 +45,7 @@ export default function Comercial() {
       </Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Kpi etiqueta="Pipeline (KCM-01)" valor={mm(k.pipeline)} sub={`${k.enviadas} propuesta(s) enviadas vigentes`} />
-        <Kpi etiqueta="Tasa de adjudicación (KCM-02)" valor={k.hitRate != null ? pct(k.hitRate, 0) : '—'} sub={`${k.resueltas90} resueltas en 90 días · meta ${pct(META_HIT_RATE, 0)}`} estado={k.hitRate == null ? undefined : k.hitRate >= META_HIT_RATE ? 'verde' : k.hitRate >= 0.1 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="Tasa de adjudicación (KCM-02)" valor={k.hitRate != null ? pct(k.hitRate, 0) : '—'} sub={`${k.resueltas90} resueltas en 90 días · meta ${pct(META_HIT_RATE, 0)}`} estado={ek('KCM-02', k.hitRate)} ayuda={ayudaKpi('KCM-02')} />
         <Kpi etiqueta="Adjudicado por monto (KCM-03)" valor={k.hitMonto != null ? pct(k.hitMonto, 0) : '—'} sub="del monto ofertado resuelto, 12 meses" />
         <Kpi etiqueta="Margen ofertado (KCM-04)" valor={k.margenPromedio != null ? pct(k.margenPromedio, 1) : '—'} sub={`ponderado, 12 meses · mínimo ${pct(d.config.umbrales.margenMinimo, 0)}`} estado={k.margenPromedio == null ? undefined : k.margenPromedio >= d.config.umbrales.margenMinimo ? 'verde' : 'amarillo'} />
         <Kpi etiqueta="Clientes recurrentes (KCM-06)" valor={k.recurrentes != null ? pct(k.recurrentes, 0) : '—'} sub={`${k.leadsAbiertos} leads abiertos`} />

@@ -3,6 +3,7 @@
 // aprobarse y los obligatorios condicionan la recepción provisoria. Un rechazo abre una no
 // conformidad (NCR) y un protocolo de reinspección. Las HH de corrección se registran en el RDO con
 // marca de retrabajo: alimentan el rework rate y el costo de no calidad.
+import { estadoKpi } from './umbrales'
 import type { Datos } from './datos'
 import type { Dia, EstadoNCR, EstadoProtocolo, EstadoSemaforo, NoConformidad, ProtocoloCalidad, RDO, Rol } from './types'
 
@@ -178,7 +179,7 @@ export function indicadoresCalidad(d: Pick<Datos, 'protocolosCalidad' | 'inspecc
     inspecciones: insp.length ? insp.filter((i) => i.realizada && i.realizada.fecha <= t).length / insp.length : null,
     pendientesHoy: protocolosVigentes(ps, t).filter((p) => p.programado <= t && (estadoProtocolo(p, t) === 'pendiente' || estadoProtocolo(p, t) === 'en_inspeccion')).length,
     porVisarITO: ps.filter((p) => p.requiereITO && estadoProtocolo(p, t) === 'aprobado').length,
-    // Semáforo (14 §5.3): NCR abiertas ≤ 3 verde, 4–8 amarillo, > 8 o vencidas rojo
-    estado: !ps.length && !ncrs.length ? 'na' : vencidas > 0 || n > 8 ? 'rojo' : n > 3 ? 'amarillo' : 'verde',
+    // Semáforo (14 §4.5 KCA-02): > 5 abiertas alerta; > 10 o alguna con más de 30 días crítico
+    estado: !ps.length && !ncrs.length ? 'na' : n && t - Math.min(...abiertas.map((x) => x.creado)) > 30 ? 'rojo' : estadoKpi(null, 'KCA-02', n),
   }
 }

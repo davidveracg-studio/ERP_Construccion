@@ -14,6 +14,7 @@ import { indicadoresOC } from '../domain/ordenesCambio'
 import type { Garantia, ObjetoGarantia, Obligacion, RecepcionObra, TipoObligacion } from '../domain/types'
 import { useCalc } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 const fechaInput = (d: number) => iso(d)
 
@@ -48,7 +49,7 @@ export default function Contrato() {
         <Kpi etiqueta="Monto vigente" valor={mm(c.venta)} sub={`original ${mm(c.venta - ocs.montoAprobado)} · OC ${mm(ocs.montoAprobado)}`} />
         <Kpi etiqueta="Plazo vigente" valor={`${obra.plazoDias} días`} sub={`término ${fmtFecha(c.terminoContractual - 1)}${ocs.diasPlazoAprobados ? ` · OC +${ocs.diasPlazoAprobados} d` : ''}`} />
         <Kpi etiqueta="Exposición a multas" valor={mm(multas.total)} sub={`tope ${mm(multas.tope)} (${pct(obra.topeMultas ?? TOPE_MULTAS_DEFECTO, 0)})`}
-          estado={multas.total === 0 ? 'verde' : multas.total < multas.tope * 0.5 ? 'amarillo' : 'rojo'} />
+          estado={ek('KDO-05', c.venta > 0 ? multas.total / c.venta : null)} ayuda={ayudaKpi('KDO-05')} />
         <Kpi etiqueta="Garantías en poder del mandante" valor={mm(vivas.reduce((s, g) => s + g.monto, 0))} sub={`${vivas.length} garantías${porVencer ? ` · ${porVencer} por vencer` : ''}`}
           estado={porVencer ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Obligaciones por atender" valor={pendientesOblig} sub={`de ${obligaciones.filter((o) => !o.cumplida).length} pendientes`} estado={pendientesOblig ? 'amarillo' : 'verde'} />

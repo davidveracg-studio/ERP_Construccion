@@ -13,8 +13,8 @@ import { num, pct } from '../domain/formato'
 import type { Incidente, MedidaCorrectiva, ObservacionPreventiva, TipoIncidente, TipoTareaCritica } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
-const tonoPct = (v: number | null, obj: number, alerta: number) => (v == null ? undefined : v >= obj ? 'verde' : v >= alerta ? 'amarillo' : 'rojo')
 
 export default function Seguridad() {
   const { d, c } = useCalc()
@@ -39,14 +39,14 @@ export default function Seguridad() {
         Seguridad y salud en el trabajo
       </Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi etiqueta="Días sin accidentes CTP (KSE-09)" valor={k.diasSinCTP} sub={`${k.ctp} CTP · ${k.stp} sin tiempo perdido · ${k.incidentesMes} incidentes en 30 días`} estado={k.estado === 'na' ? undefined : k.ctp > 0 || k.graveMes ? 'rojo' : 'verde'} />
-        <Kpi etiqueta="Tasa de frecuencia / gravedad" valor={`${k.if != null ? num(k.if, 1) : '—'} / ${k.ig != null ? num(k.ig, 0) : '—'}`} sub={`IF (KSE-01) e IG (KSE-02) del mes · meta IF ${metaIF}`} estado={k.if == null ? undefined : k.if <= metaIF ? 'verde' : k.if <= 2 * metaIF ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="Días sin accidentes CTP (KSE-09)" valor={k.diasSinCTP} sub={`${k.ctp} CTP · ${k.stp} sin tiempo perdido · ${k.incidentesMes} incidentes en 30 días`} estado={k.estado === 'na' ? undefined : k.graveMes ? 'rojo' : k.ctp > 0 ? 'amarillo' : 'verde'} ayuda="Doc 14 KSE-12: alerta ≥ 1 accidente con tiempo perdido · crítico grave o fatal" />
+        <Kpi etiqueta="Tasa de frecuencia / gravedad" valor={`${k.if != null ? num(k.if, 1) : '—'} / ${k.ig != null ? num(k.ig, 0) : '—'}`} sub={`IF (KSE-01) e IG (KSE-02) del mes · meta IF ${metaIF}`} estado={k.if == null ? undefined : k.if <= metaIF ? 'verde' : k.if <= 2 * metaIF ? 'amarillo' : 'rojo'} ayuda={`Doc 14 KSE-01: meta ≤ ${metaIF} · alerta > ${metaIF} · crítico > ${2 * metaIF}`} />
         <Kpi etiqueta="Accidentabilidad (KSE-03)" valor={k.accidentabilidad != null ? pct(k.accidentabilidad / 100, 2) : '—'} sub={`siniestralidad ${k.siniestralidad != null ? num(k.siniestralidad, 1) : '—'} días/100 trab.`} />
-        <Kpi etiqueta="Medidas correctivas (KSE-08)" valor={k.medidasAbiertas} sub={k.medidasVencidas ? `${k.medidasVencidas} vencida(s)` : 'abiertas, ninguna vencida'} estado={k.medidasVencidas >= 5 ? 'rojo' : k.medidasVencidas ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Charlas diarias (KSE-05)" valor={k.charlas != null ? pct(k.charlas, 0) : '—'} sub="cuadrillas con charla, 7 días" estado={tonoPct(k.charlas, 1, 0.85)} />
-        <Kpi etiqueta="ART de tareas críticas (KSE-06)" valor={k.art != null ? pct(k.art, 0) : '—'} sub="tareas críticas con ART, 7 días" estado={tonoPct(k.art, 1, 0.95)} />
-        <Kpi etiqueta="Observaciones preventivas (KSE-11)" valor={k.observaciones} sub={`30 días · ${k.obsEnPlazo != null ? pct(k.obsEnPlazo, 0) : '—'} cerradas en plazo · ${k.cuasi != null ? num(k.cuasi, 1) : '—'} cuasi/100 trab.`} estado={tonoPct(k.obsEnPlazo, 0.9, 0.6)} />
-        <Kpi etiqueta="Inspecciones (KSE-10)" valor={k.inspecciones != null ? pct(k.inspecciones, 0) : '—'} sub="realizadas / programadas, 30 días" estado={tonoPct(k.inspecciones, 1, 0.75)} />
+        <Kpi etiqueta="Medidas correctivas (KSE-08)" valor={k.medidasAbiertas} sub={k.medidasVencidas ? `${k.medidasVencidas} vencida(s)` : 'abiertas, ninguna vencida'} estado={k.medidasVencidas30 > 0 ? 'rojo' : ek('KSE-08', k.medidasVencidas)} ayuda={ayudaKpi('KSE-08') + ', o alguna vencida hace más de 30 días'} />
+        <Kpi etiqueta="Charlas diarias (KSE-05)" valor={k.charlas != null ? pct(k.charlas, 0) : '—'} sub="cuadrillas con charla, 7 días" estado={ek('KSE-05', k.charlas)} ayuda={ayudaKpi('KSE-05')} />
+        <Kpi etiqueta="ART de tareas críticas (KSE-06)" valor={k.art != null ? pct(k.art, 0) : '—'} sub="tareas críticas con ART, 7 días" estado={ek('KSE-06', k.art)} ayuda={ayudaKpi('KSE-06')} />
+        <Kpi etiqueta="Observaciones preventivas (KSE-11)" valor={k.observaciones} sub={`30 días · ${k.obsEnPlazo != null ? pct(k.obsEnPlazo, 0) : '—'} cerradas en plazo · ${k.cuasi != null ? num(k.cuasi, 1) : '—'} cuasi/100 trab.`} estado={ek('KSE-11', k.obsEnPlazo)} ayuda={ayudaKpi('KSE-11')} />
+        <Kpi etiqueta="Inspecciones (KSE-10)" valor={k.inspecciones != null ? pct(k.inspecciones, 0) : '—'} sub="realizadas / programadas, 30 días" estado={ek('KSE-10', k.inspecciones)} ayuda={ayudaKpi('KSE-10')} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">

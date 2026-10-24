@@ -13,6 +13,7 @@ import { clp, num, pct } from '../domain/formato'
 import type { NoConformidad, ProtocoloCalidad } from '../domain/types'
 import { useCalc, useDatosDominio } from '../store/hooks'
 import { useStore } from '../store/store'
+import { ayudaKpi, ek } from '../store/umbralesUI'
 
 function usePartidas(obraId: string) {
   const d = useDatosDominio()
@@ -53,11 +54,11 @@ export default function Calidad() {
         Calidad
       </Titulo>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi etiqueta="NCR abiertas (KCA-02)" valor={k.ncrAbiertas} sub={k.ncrVencidas ? `${k.ncrVencidas} vencida(s)` : k.ncrAbiertas ? `la más antigua: ${k.ncrAntiguedad} días` : 'ninguna'} estado={k.estado === 'na' ? undefined : k.estado} />
-        <Kpi etiqueta="Rework rate (KCA-07)" valor={k.reworkRate != null ? pct(k.reworkRate, 1) : '—'} sub={`${num(k.hhRetrabajo7, 0)} HH de retrabajo en 7 días`} estado={k.reworkRate == null ? undefined : k.reworkRate > 0.06 ? 'rojo' : k.reworkRate > 0.03 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Aprobación a la primera (KCA-01)" valor={k.primera != null ? pct(k.primera, 0) : '—'} sub="protocolos de 90 días" estado={k.primera == null ? undefined : k.primera >= 0.9 ? 'verde' : k.primera >= 0.75 ? 'amarillo' : 'rojo'} />
-        <Kpi etiqueta="Costo de no calidad (KCA-03)" valor={k.costoNoCalidad != null ? `${(k.costoNoCalidad * 100).toLocaleString('es-CL', { maximumFractionDigits: 2 })} %` : '—'} sub={`${clp(k.costoRetrabajo)} en retrabajos`} estado={k.costoNoCalidad == null ? undefined : k.costoNoCalidad > 0.04 ? 'rojo' : k.costoNoCalidad > 0.02 ? 'amarillo' : 'verde'} />
-        <Kpi etiqueta="Inspecciones (KCA-09)" valor={k.inspecciones != null ? pct(k.inspecciones, 0) : '—'} sub={`30 días · ${k.ejecutados} protocolos, ${k.rechazados} rechazados`} estado={k.inspecciones == null ? undefined : k.inspecciones >= 1 ? 'verde' : k.inspecciones >= 0.75 ? 'amarillo' : 'rojo'} />
+        <Kpi etiqueta="NCR abiertas (KCA-02)" valor={k.ncrAbiertas} sub={k.ncrVencidas ? `${k.ncrVencidas} vencida(s)` : k.ncrAbiertas ? `la más antigua: ${k.ncrAntiguedad} días` : 'ninguna'} estado={k.estado === 'na' ? undefined : k.estado} ayuda={ayudaKpi('KCA-02') + ', o alguna con más de 30 días'} />
+        <Kpi etiqueta="Rework rate (KCA-07)" valor={k.reworkRate != null ? pct(k.reworkRate, 1) : '—'} sub={`${num(k.hhRetrabajo7, 0)} HH de retrabajo en 7 días`} estado={ek('KCA-07', k.reworkRate)} ayuda={ayudaKpi('KCA-07')} />
+        <Kpi etiqueta="Aprobación a la primera (KCA-01)" valor={k.primera != null ? pct(k.primera, 0) : '—'} sub="protocolos de 90 días" estado={ek('KCA-01', k.primera)} ayuda={ayudaKpi('KCA-01')} />
+        <Kpi etiqueta="Costo de no calidad (KCA-03)" valor={k.costoNoCalidad != null ? `${(k.costoNoCalidad * 100).toLocaleString('es-CL', { maximumFractionDigits: 2 })} %` : '—'} sub={`${clp(k.costoRetrabajo)} en retrabajos`} estado={ek('KCA-03', k.costoNoCalidad)} ayuda={ayudaKpi('KCA-03')} />
+        <Kpi etiqueta="Inspecciones (KCA-09)" valor={k.inspecciones != null ? pct(k.inspecciones, 0) : '—'} sub={`30 días · ${k.ejecutados} protocolos, ${k.rechazados} rechazados`} estado={ek('KCA-09', k.inspecciones)} ayuda={ayudaKpi('KCA-09')} />
       </div>
       {c.obra.estado === 'en_ejecucion' && c.avanceReal >= 0.9 && faltan.length > 0 && (
         <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-700">Recepción provisoria (RULE-103): hoy faltan {faltan.length} protocolo(s) obligatorio(s) por aprobar.</p>

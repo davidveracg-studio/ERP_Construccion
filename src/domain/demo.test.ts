@@ -3,6 +3,7 @@ import { calcularObra } from './evm'
 import { dia } from './fechas'
 import { semaforo } from './semaforo'
 import { demoDesactualizada, generarDemo, VERSION_DEMO } from './seed'
+import { estadosTarjetas } from './tarjetasDemo'
 
 const ABIERTAS = ['activa', 'reconocida', 'en_accion']
 
@@ -39,6 +40,8 @@ describe('Demo', () => {
           const c = calcularObra(d, o.id, hoy)
           const donde = `${o.id} día +${k}`
           expect(semaforo(c, d.config).filter((x) => x.estado === 'rojo').map((x) => x.dim), donde).toEqual([])
+          // Tarjetas de las pantallas con los umbrales del doc 14 §4 (Programa, Costos, Terreno, Calidad, Seguridad…)
+          expect(Object.entries(estadosTarjetas(c, d.config)).filter(([, e]) => e === 'rojo').map(([id]) => id), donde).toEqual([])
           expect(c.spi!, donde).toBeGreaterThanOrEqual(0.85)
           expect(c.cpi!, donde).toBeGreaterThanOrEqual(0.95)
           expect(c.margenProyectado, donde).toBeGreaterThanOrEqual(d.config.umbrales.margenMinimo)
