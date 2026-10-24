@@ -220,7 +220,7 @@ export default function PortalSubcontratista() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi etiqueta="Subcontratos" valor={mios.length} sub={`${mios.filter((s) => estadoSub(s, t) === 'vigente').length} vigentes`} />
         <Kpi etiqueta="Por cobrar (bruto)" valor={mm(mios.reduce((s, sc) => s + sc.lineas.reduce((x, l) => x + Math.max(0, Math.min(l.cantidad, avanceValidado(d.rdos, sc.obraId, l.partidaId, t)) - cobradoPartida(d.epsSubcontrato, sc.id, l.partidaId, t)) * l.pu, 0), 0))} sub="avance validado no cobrado" />
-        <Kpi etiqueta="EP bloqueados" valor={bloqueados} sub="falta el F30-1 del período" estado={bloqueados ? 'rojo' : 'verde'} />
+        <Kpi etiqueta="EP bloqueados" valor={bloqueados} sub="KSU-02 · falta el F30-1 del período" estado={bloqueados ? 'amarillo' : 'verde'} />
         <Kpi etiqueta="Documentos al día" valor={`${mios.filter((sc) => acreditacion(sc, d.trabajadores, d.documentosLaborales, t).alDia).length} de ${mios.length}`} sub="F30, F30-1 y trabajadores" />
       </div>
       {mios.length > 1 && (

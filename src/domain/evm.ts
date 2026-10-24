@@ -457,6 +457,14 @@ export function serieCurvaS(d: Datos, obraId: string, corte: Dia): PuntoSerie[] 
 }
 
 /** Solo lo planificado (PV) a una fecha futura, sin recorrer registros reales. */
+/** KPL-10 y KPL-15: actividades iniciadas (o que debían iniciar) cuyo término proyectado supera el de la línea base. */
+export function actividadesAtrasadas(c: CalcObra) {
+  const lbMap = new Map((c.lb?.actividades ?? []).map((a) => [a.id, a]))
+  const iniciadas = (c.actualizado?.actividades ?? []).filter((a) => !a.esHito && (a.inicioReal != null || (lbMap.get(a.id)?.inicio ?? Infinity) <= c.corte))
+  const atrasadas = iniciadas.filter((a) => (c.cpm.get(a.id)?.ef ?? 0) > (lbMap.get(a.id)?.fin ?? Infinity))
+  return { iniciadas, atrasadas, criticas: atrasadas.filter((a) => c.cpm.get(a.id)?.critica), pct: iniciadas.length ? atrasadas.length / iniciadas.length : null }
+}
+
 export function calcularObraPlan(d: Datos, obraId: string, t: Dia) {
   const obra = d.obras.find((o) => o.id === obraId)!
   const partidas = d.partidas.filter((p) => p.obraId === obraId && partidaVigente(p, d.ordenesCambio, t))

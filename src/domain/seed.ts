@@ -92,7 +92,7 @@ const CUENTA: Record<TipoRecurso | 'GG', string> = { MO: '5-1-00', MAT: '5-1-01'
 const OBRA_AROMOS: SpecObra = {
   semilla: 42,
   condiciones: { anticipo: 0.1, retencion: 0.05, diasAprobacion: 10, diasPago: 30, diasPagoProveedores: 30, diasDevolucionRetencion: 60, capitalTrabajo: 0.25, reajuste: { indice: 'IPC', base: 100 } },
-  ritmo: 1.08,
+  ritmo: 1.09,
   inicioHaceDias: 112,
   prefijoCC: 'LA',
   obra: {
@@ -174,10 +174,10 @@ const OBRA_CLINICA: SpecObra = {
   ],
   actividades: [
     { codigo: 'B01', nombre: 'Demoliciones', duracion: 15, partidas: [['1.1', 450]], cuadrilla: 'cq_munoz', eficiencia: 1.04, factorHH: 0.95 },
-    { codigo: 'B02', nombre: 'Tabiquería', duracion: 30, pred: ['B01'], partidas: [['2.1', 820]], cuadrilla: 'cq_munoz', eficiencia: 1.02, factorHH: 0.96 },
-    { codigo: 'B03', nombre: 'Instalaciones eléctricas', duracion: 45, pred: ['B02CC+10'], partidas: [['4.1', 1]], cuadrilla: 'cq_munoz', eficiencia: 1.12 },
-    { codigo: 'B05', nombre: 'Climatización', duracion: 40, pred: ['B03CC+5'], partidas: [['4.2', 1]], cuadrilla: 'cq_munoz', eficiencia: 1.12 },
-    { codigo: 'B04', nombre: 'Cielos modulares', duracion: 25, pred: ['B02FC-5'], partidas: [['2.2', 610]], cuadrilla: 'cq_munoz', eficiencia: 1.0 },
+    { codigo: 'B02', nombre: 'Tabiquería', duracion: 30, pred: ['B01'], partidas: [['2.1', 820]], cuadrilla: 'cq_munoz', eficiencia: 1.12, factorHH: 0.96 },
+    { codigo: 'B03', nombre: 'Instalaciones eléctricas', duracion: 45, pred: ['B02CC+10'], partidas: [['4.1', 1]], cuadrilla: 'cq_munoz', eficiencia: 1.25 },
+    { codigo: 'B05', nombre: 'Climatización', duracion: 40, pred: ['B03CC+5'], partidas: [['4.2', 1]], cuadrilla: 'cq_munoz', eficiencia: 1.25 },
+    { codigo: 'B04', nombre: 'Cielos modulares', duracion: 25, pred: ['B02FC-5'], partidas: [['2.2', 610]], cuadrilla: 'cq_munoz', eficiencia: 1.06 },
     { codigo: 'B06', nombre: 'Pavimentos', duracion: 20, pred: ['B04'], partidas: [['3.1', 700]], cuadrilla: 'cq_munoz' },
     { codigo: 'B07', nombre: 'Pintura', duracion: 20, pred: ['B04FC+5'], partidas: [['3.2', 2400]], cuadrilla: 'cq_munoz' },
     { codigo: 'HB', nombre: 'Entrega al mandante', duracion: 0, pred: ['B05', 'B06', 'B07'], hito: true, contractual: true },
@@ -1961,7 +1961,7 @@ function generadoresDemo(p: Partida, cantidad: number, n: number): Generador[] {
  * Versión del generador: subirla cuando cambien los datos de la demo, para que la demo
  * compartida se regenere en la próxima visita aunque ya se haya renovado ese día.
  */
-export const VERSION_DEMO = 21
+export const VERSION_DEMO = 22
 
 /** La demo debe regenerarse: es de otro día o de otra versión del generador. */
 export function demoDesactualizada(c: { demoGenerada?: Dia; demoVersion?: number }, hoyDia: Dia) {

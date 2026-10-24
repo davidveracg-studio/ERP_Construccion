@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { Gantt } from '../components/Gantt'
 import { Badge, Boton, Campo, Card, Kpi, Modal, Titulo, Vacio, inputCls } from '../components/ui'
 import GuiaFigura from '../components/GuiaFigura'
+import { actividadesAtrasadas } from '../domain/evm'
 import { dia, fmtFecha, iso } from '../domain/fechas'
 import { pct } from '../domain/formato'
 import { useCalc } from '../store/hooks'
@@ -23,10 +24,7 @@ export default function Programa() {
   const lbMap = new Map((c.lb?.actividades ?? []).map((a) => [a.id, a]))
   const pendiente = d.programas.find((p) => p.obraId === c.obra.id && p.tipo === 'lineaBase' && p.estado === 'en_aprobacion')
   const versiones = d.programas.filter((p) => p.obraId === c.obra.id && p.tipo === 'lineaBase').sort((a, b) => b.version - a.version)
-  const noHitos = acts.filter((a) => !a.esHito)
-  const iniciadasODebian = noHitos.filter((a) => a.inicioReal != null || (lbMap.get(a.id)?.inicio ?? Infinity) <= c.corte)
-  const atrasadas = iniciadasODebian.filter((a) => (c.cpm.get(a.id)?.ef ?? 0) > (lbMap.get(a.id)?.fin ?? Infinity))
-  const criticasAtrasadas = atrasadas.filter((a) => c.cpm.get(a.id)?.critica)
+  const { iniciadas: iniciadasODebian, atrasadas, criticas: criticasAtrasadas } = actividadesAtrasadas(c)
   const a = acts.find((x) => x.id === sel)
   const r = a ? c.cpm.get(a.id) : undefined
   const b = a ? lbMap.get(a.id) : undefined
